@@ -100,21 +100,44 @@ public final class ContainersServiceImpl implements Containers {
                                  String runtimeBinaryName, java.time.Duration stopTimeout,
                                  io.nanofaas.containerd.spi.ContainerNetwork network,
                                  Path stateDirectory) {
+        this(channel, snapshotter, runtimeName, runtimeBinaryName, stopTimeout, network, stateDirectory, false);
+    }
+
+    public ContainersServiceImpl(ManagedChannel channel, String snapshotter, String runtimeName,
+                                 String runtimeBinaryName, java.time.Duration stopTimeout,
+                                 io.nanofaas.containerd.spi.ContainerNetwork network,
+                                 Path stateDirectory, boolean systemdCgroup) {
         this.network = network;
         this.stateDirectory = stateDirectory;
         this.stub = containerd.services.containers.v1.ContainersGrpc.newBlockingStub(channel);
         this.snapshots = new SnapshotManager(channel);
         this.leases = new LeaseManager(channel);
         this.rootfsResolver = new ImageRootfsResolver(channel);
-        this.tasks = new TasksServiceImpl(channel, runtimeBinaryName);
+        this.tasks = new TasksServiceImpl(channel, runtimeBinaryName, systemdCgroup);
         this.snapshotter = snapshotter;
         this.runtimeName = runtimeName;
         this.stopTimeout = stopTimeout;
     }
 
     @Override
+    public NetworkAttachment networkAttachment(String id) {
+        ProtoMapper.requireValidId(id);
+        // An unavailable daemon is not an absent attachment.
+        containerOf(id);
+        var entry = ContainerJournal.read(stateDirectory, id);
+        return entry == null ? null : entry.attachment;
+    }
+
+    @Override
+    public List<Container> pendingRemovals() {
+        return ContainerJournal.list(stateDirectory).stream().filter(entry -> entry.pending)
+                .map(entry -> ProtoMapper.map(entry.container)).toList();
+    }
+
+    @Override
     public Container create(ContainerSpec spec) {
         ProtoMapper.requireValidId(spec.id());
+        refusePendingCleanup(spec.id());
         if (spec.network() != null && network == null) {
             throw new ContainerdException("container " + spec.id() + " asks for network \""
                     + spec.network() + "\" but this client has no ContainerNetwork. Build it with"
@@ -145,6 +168,7 @@ public final class ContainersServiceImpl implements Containers {
 
     private Container createContainer(ContainerSpec spec, ImageConfig imageConfig,
                                       LeaseManager.Lease lease) {
+        boolean metadataCreated = false;
         try {
             var container = containerd.services.containers.v1.Container.newBuilder()
                     .setId(spec.id())
@@ -164,6 +188,8 @@ public final class ContainersServiceImpl implements Containers {
             var containers = lease == null ? stub : stub.withInterceptors(lease.asHeader());
             var created = containers.create(containerd.services.containers.v1.CreateContainerRequest.newBuilder()
                     .setContainer(container).build()).getContainer();
+            metadataCreated = true;
+            new ContainerJournal(created).save(stateDirectory);
             log.debug("container create complete: id={}", spec.id());
             return ProtoMapper.map(created);
         } catch (RuntimeException e) {
@@ -173,10 +199,14 @@ public final class ContainersServiceImpl implements Containers {
             // has to work around above. Catching only StatusRuntimeException left that hole open
             // for every other failure: a spec this code cannot build, a log directory it cannot
             // create, anything thrown between the two calls.
-            try {
-                snapshots.remove(snapshotter, spec.id());
-            } catch (RuntimeException cleanupFailure) {
-                log.warn("failed to clean up snapshot {} after container create failure", spec.id(), cleanupFailure);
+            // A failed journal write after Create must leave the daemon-owned snapshot intact.
+            // The container remains discoverable through list() and remove() can rebuild its journal.
+            if (!metadataCreated) {
+                try {
+                    snapshots.remove(snapshotter, spec.id());
+                } catch (RuntimeException cleanupFailure) {
+                    e.addSuppressed(cleanupFailure);
+                }
             }
             if (e instanceof StatusRuntimeException status) {
                 if (status.getStatus().getCode() == io.grpc.Status.Code.ALREADY_EXISTS) {
@@ -323,16 +353,13 @@ public final class ContainersServiceImpl implements Containers {
             return;
         }
         try (var entries = Files.list(dir)) {
-            entries.forEach(entry -> {
-                try {
-                    Files.deleteIfExists(entry);
-                } catch (IOException ignored) {
-                    // best effort
-                }
-            });
+            for (var entry : entries.filter(path -> !path.getFileName().toString().equals("lifecycle.properties")).toList()) {
+                Files.deleteIfExists(entry);
+            }
+            Files.deleteIfExists(dir.resolve("lifecycle.properties"));
             Files.deleteIfExists(dir);
         } catch (IOException e) {
-            log.warn("could not remove the state directory {}", dir, e);
+            throw new ContainerdException("could not remove the state directory " + dir, e);
         }
     }
 
@@ -368,76 +395,137 @@ public final class ContainersServiceImpl implements Containers {
 
     @Override
     public void remove(String id, RemoveOptions options) {
-        log.debug("container remove: id={} removeSnapshot={} force={}",
-                id, options.removeSnapshot(), options.force());
-        var existingTask = tasks.find(id);
-        if (existingTask.isPresent()) {
-            var task = existingTask.get();
-            boolean running = task.state() == ContainerState.RUNNING
-                    || task.state() == ContainerState.CREATED
-                    || task.state() == ContainerState.STARTING
-                    || task.state() == ContainerState.PAUSED;
-            if (running && !options.force()) {
-                throw new ContainerdException(
-                        "container " + id + " is still running; stop it first or use RemoveOptions.force(true)");
+        ProtoMapper.requireValidId(id);
+        var entry = journal(id);
+        if (entry == null) {
+            if (runtimeTask(id) != null) {
+                throw new ContainerdException("task " + id + " still exists without container metadata; cleanup cannot be confirmed");
             }
-            if (running) {
-                stop(id);
-            } else {
-                // Already exited, so its namespace is gone; the address it held is not, and only
-                // the container id identifies it now.
-                detachNetwork(id, -1);
-                tasks.delete(id);
+            return;
+        }
+        // Without force, prove that removal is safe before accepting a durable cleanup intent.
+        TaskInfo task = options.force() ? null : taskForRemoval(id);
+        if (task != null && task.state() != ContainerState.STOPPED) {
+            throw new ContainerdException("container " + id + " is still running; stop it first or use RemoveOptions.force(true)");
+        }
+        entry.pending = true;
+        entry.removeSnapshot |= options.removeSnapshot();
+        entry.save(stateDirectory);
+        ContainerdException failure = null;
+        boolean lookupFailed = false;
+        if (options.force()) {
+            try { task = taskForRemoval(id); }
+            catch (RuntimeException e) {
+                lookupFailed = true;
+                failure = cleanupFailure(failure, e);
             }
         }
+        boolean running = task != null && task.state() != ContainerState.STOPPED;
+        try { detachNetwork(id, running ? task.pid() : -1); }
+        catch (RuntimeException e) { failure = cleanupFailure(failure, e); }
+        boolean taskRemoved = task == null && !lookupFailed;
+        if (!taskRemoved) {
+            RuntimeException terminationFailure = null;
+            try {
+                if (running || lookupFailed) terminate(id);
+            } catch (TaskNotFoundException ignored) {
+                // Get/Kill also depend on container metadata; Delete/List must still confirm removal.
+            } catch (RuntimeException e) { terminationFailure = e; }
+            // A wait timeout does not prove that the task is still running. Always attempt Delete.
+            try {
+                try { tasks.delete(id); }
+                catch (TaskNotFoundException e) {
+                    if (runtimeTask(id) != null) {
+                        throw new ContainerdException("task " + id
+                                + " still exists in runtime inventory; retain metadata and retry cleanup", e);
+                    }
+                }
+                taskRemoved = true;
+            } catch (RuntimeException e) {
+                failure = cleanupFailure(failure, e);
+                if (terminationFailure != null) failure = cleanupFailure(failure, terminationFailure);
+            }
+        }
+        // Tasks.Get/Delete require container metadata. Removing it before reaping the task makes
+        // a STOPPED runtime task unreachable by those RPCs and destroys the retry path.
+        if (taskRemoved) {
+            try {
+                stub.delete(containerd.services.containers.v1.DeleteContainerRequest.newBuilder().setId(id).build());
+            } catch (StatusRuntimeException e) {
+                if (e.getStatus().getCode() != io.grpc.Status.Code.NOT_FOUND) failure = cleanupFailure(failure, e);
+            }
+            if (entry.removeSnapshot && !entry.container.getSnapshotKey().isEmpty()) {
+                try { snapshots.remove(entry.container.getSnapshotter(), entry.container.getSnapshotKey()); }
+                catch (RuntimeException e) { failure = cleanupFailure(failure, e); }
+            }
+        }
+        if (failure != null) throw failure;
+        removeStateDirectory(id);
+    }
 
-        containerd.services.containers.v1.Container container;
-        try {
-            container = stub.get(containerd.services.containers.v1.GetContainerRequest.newBuilder()
-                    .setId(id).build()).getContainer();
-        } catch (StatusRuntimeException e) {
-            if (e.getStatus().getCode() == io.grpc.Status.Code.NOT_FOUND) {
-                log.debug("container {} already gone (idempotent remove)", id);
-                return;
-            }
-            throw StatusExceptionMapper.map(e, StatusExceptionMapper.ResourceKind.CONTAINER);
-        }
+    private TaskInfo taskForRemoval(String id) {
+        return tasks.find(id).orElseGet(() -> runtimeTask(id));
+    }
 
+    private TaskInfo runtimeTask(String id) {
+        return tasks.list().stream().filter(task -> id.equals(task.containerId())).findFirst().orElse(null);
+    }
+
+    private static ContainerdException cleanupFailure(ContainerdException primary, RuntimeException failure) {
+        if (primary == null) return failure instanceof ContainerdException typed ? typed
+                : new ContainerdException("container cleanup failed: " + failure.getMessage(), failure);
+        primary.addSuppressed(failure);
+        return primary;
+    }
+
+    private ContainerJournal journal(String id) {
+        var entry = ContainerJournal.read(stateDirectory, id);
+        if (entry != null) return entry;
         try {
-            stub.delete(containerd.services.containers.v1.DeleteContainerRequest.newBuilder()
-                    .setId(id).build());
-            if (options.removeSnapshot() && !container.getSnapshotKey().isEmpty()) {
-                snapshots.remove(container.getSnapshotter(), container.getSnapshotKey()); // idempotent
-            }
-            removeStateDirectory(id);
-        } catch (StatusRuntimeException e) {
-            throw StatusExceptionMapper.map(e, StatusExceptionMapper.ResourceKind.CONTAINER);
+            entry = new ContainerJournal(containerOf(id));
+            // Legacy containers may already have an allocation without a journal.
+            entry.networkPending = entry.container.containsLabels(NETWORK_LABEL);
+            return entry;
+        } catch (ContainerNotFoundException e) {
+            return null;
         }
-        log.debug("container remove complete: id={}", id);
+    }
+
+    private void refusePendingCleanup(String id) {
+        var entry = ContainerJournal.read(stateDirectory, id);
+        if (entry != null && entry.pending) {
+            throw new ContainerdException("container " + id + " has pending cleanup; complete remove before reuse");
+        }
     }
 
     @Override
     public int start(String id) {
+        refusePendingCleanup(id);
         TaskInfo existing = tasks.find(id).orElse(null);
-        if (existing != null && (existing.state() == ContainerState.RUNNING || existing.state() == ContainerState.STARTING)) {
-            throw new ContainerStartException("task for container " + id + " is already running", null);
+        if (existing != null && existing.state() != ContainerState.STOPPED) {
+            throw new ContainerStartException("task for container " + id + " already exists in state "
+                    + existing.state(), null);
         }
         if (existing != null && existing.state() == ContainerState.STOPPED) {
             log.debug("task for container {} is stopped; deleting before restart", id);
             tasks.delete(id);
         }
+        boolean taskCreated = false;
         try {
             tasks.create(id);
+            taskCreated = true;
             int pid = tasks.start(id);
             attachNetwork(id, pid);
             return pid;
         } catch (RuntimeException e) {
             try {
-                if (tasks.exists(id)) {
+                if (taskCreated && tasks.exists(id)) {
+                    tasks.kill(id, Signal.KILL);
+                    tasks.wait(id, stopTimeout);
                     tasks.delete(id);
                 }
             } catch (RuntimeException cleanupFailure) {
-                log.warn("failed to clean up task for container {} after start failure", id, cleanupFailure);
+                e.addSuppressed(cleanupFailure);
             }
             if (e instanceof ContainerdException mapped) {
                 // already a typed library exception (e.g. ContainerNotFoundException from a
@@ -456,35 +544,40 @@ public final class ContainersServiceImpl implements Containers {
      * plugin that failed part-way may already have taken an address.
      */
     private void attachNetwork(String id, int pid) {
-        String attachTo = networkOf(id);
-        if (attachTo == null) {
-            return;
-        }
+        var entry = journal(id);
+        String attachTo = entry == null ? null : entry.container.getLabelsMap().get(NETWORK_LABEL);
+        if (attachTo == null) return;
+        if (network == null) throw new ContainerdException("no ContainerNetwork configured for " + id);
+        entry.networkPending = true;
+        entry.save(stateDirectory); // Before ADD: partial ADD must be recoverable too.
         try {
-            log.debug("attaching container {} to network {} (pid={})", id, attachTo, pid);
-            writeResolvConf(id, network.attach(id, attachTo, pid));
+            entry.attachment = network.attach(id, attachTo, pid);
+            entry.save(stateDirectory);
+            writeResolvConf(id, entry.attachment);
         } catch (RuntimeException e) {
-            detachNetwork(id, pid);
+            entry.pending = true;
+            try { entry.save(stateDirectory); } catch (RuntimeException secondary) { e.addSuppressed(secondary); }
+            try { detachNetwork(id, pid); } catch (RuntimeException secondary) { e.addSuppressed(secondary); }
             throw new ContainerStartException("container " + id + " started but could not be attached"
                     + " to network " + attachTo + ": " + e.getMessage(), e);
         }
     }
 
-    /**
-     * Detaches the container's network. Never throws: it runs on paths that are already tearing
-     * something down, and a failure here must not replace the reason they were running.
-     */
+    /** DEL is idempotent; keep its identity until both DEL and the journal write succeed. */
     private void detachNetwork(String id, int pid) {
-        String detachFrom = networkOf(id);
-        if (detachFrom == null) {
-            return;
-        }
+        var entry = journal(id);
+        if (entry == null || !entry.networkPending) return;
+        String detachFrom = entry.container.getLabelsMap().get(NETWORK_LABEL);
         try {
-            log.debug("detaching container {} from network {} (pid={})", id, detachFrom, pid);
+            if (network == null) throw new ContainerdException("no ContainerNetwork configured for " + id);
             network.detach(id, detachFrom, pid);
+            entry.networkPending = false;
+            entry.attachment = null;
+            entry.save(stateDirectory);
         } catch (RuntimeException e) {
-            log.warn("could not detach container {} from network {}; an address may be left"
-                    + " allocated on the host", id, detachFrom, e);
+            entry.pending = true;
+            try { entry.save(stateDirectory); } catch (RuntimeException secondary) { e.addSuppressed(secondary); }
+            throw cleanupFailure(null, e);
         }
     }
 
@@ -516,45 +609,28 @@ public final class ContainersServiceImpl implements Containers {
         }
     }
 
-    /** The network this container was created with, or null. Read from containerd, not remembered. */
-    private String networkOf(String id) {
-        if (network == null) {
-            return null;
-        }
-        try {
-            return containerOf(id).getLabelsMap().get(NETWORK_LABEL);
-        } catch (RuntimeException e) {
-            log.debug("could not read the network label for {}", id, e);
-            return null;
-        }
-    }
-
     @Override
     public Optional<ExitStatus> stop(String id) {
-        if (!tasks.exists(id)) {
-            log.debug("stop: no task for container {} (idempotent)", id);
-            return Optional.empty();
+        var task = tasks.find(id).orElse(null);
+        ContainerdException failure = null;
+        try { detachNetwork(id, task == null ? -1 : task.pid()); }
+        catch (RuntimeException e) { failure = cleanupFailure(failure, e); }
+        Optional<ExitStatus> result = Optional.empty();
+        if (task != null) {
+            try {
+                result = Optional.of(terminate(id));
+                deleteTaskQuietly(id);
+            } catch (TaskNotFoundException ignored) {
+                deleteTaskQuietly(id);
+            } catch (RuntimeException e) {
+                var primary = e instanceof ContainerStopException ? e
+                        : new ContainerStopException("failed to stop container " + id + ": " + e.getMessage(), e);
+                if (failure != null) primary.addSuppressed(failure);
+                throw primary;
+            }
         }
-        // Before anything is killed: the namespace CNI needs is the task's, and it goes when the
-        // task does. Detaching afterwards would find nothing to undo and leak the address.
-        detachNetwork(id, tasks.find(id).map(TaskInfo::pid).orElse(-1));
-
-        ExitStatus status;
-        try {
-            status = terminate(id);
-        } catch (TaskNotFoundException e) {
-            // the task exited and was reaped while we were stopping it
-            deleteTaskQuietly(id);
-            return Optional.empty();
-        } catch (ContainerStopException e) {
-            throw e;
-        } catch (RuntimeException e) {
-            // The task is still alive, or the RPC failed. Deleting now would fail on a live task
-            // and, from a finally block, would replace this exception with that failure.
-            throw new ContainerStopException("failed to stop container " + id + ": " + e.getMessage(), e);
-        }
-        deleteTaskQuietly(id);
-        return Optional.of(status);
+        if (failure != null) throw failure;
+        return result;
     }
 
     /**

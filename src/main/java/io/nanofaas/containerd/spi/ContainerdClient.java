@@ -91,6 +91,13 @@ public interface ContainerdClient extends AutoCloseable {
         Builder runtimeBinaryName(String runtimeBinaryName);
 
         /**
+         * Configures the runc-v2 shim to use systemd cgroup management.
+         * @param enabled true for delegated systemd cgroups; false by default
+         * @return this builder
+         */
+        Builder systemdCgroup(boolean enabled);
+
+        /**
          * How long {@link Containers#stop} waits after SIGTERM before sending SIGKILL.
          * Default 10 seconds.
          *
@@ -115,7 +122,9 @@ public interface ContainerdClient extends AutoCloseable {
         /**
          * Where per-container files this library owns are kept.
          *
-         * <p>Today that is the {@code resolv.conf} bind-mounted into a networked container. It has
+         * <p>This includes the lifecycle journal and the {@code resolv.conf} bind-mounted into a
+         * networked container. State is isolated by normalized absolute socket path and namespace.
+         * Use the same socket path, namespace and directory after restart. It has
          * to outlive nothing less than the container itself: the mount points at this file, so if
          * it disappears while the container runs — a reboot clearing the default temporary
          * directory would do it — the container is left with a mount pointing at nothing.
@@ -124,8 +133,7 @@ public interface ContainerdClient extends AutoCloseable {
          * running and survives nothing. Anything long-lived should name a persistent path.
          *
          * @param stateDirectory directory for this client's per-container files; created when
-         *        first needed rather than now, so a client that never networks a container never
-         *        needs it to exist
+         *        first needed by a lifecycle operation rather than at client construction
          * @return this builder
          */
         Builder stateDirectory(java.nio.file.Path stateDirectory);

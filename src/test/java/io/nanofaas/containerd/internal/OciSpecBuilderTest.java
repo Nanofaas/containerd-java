@@ -218,4 +218,23 @@ class OciSpecBuilderTest {
         assertThatThrownBy(() -> builder.openFilesLimit(0))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("positive");
     }
+
+    @Test
+    void rootlessResourceKnobsReachTheOciSpec() {
+        var spec = parse(OciSpecBuilder.buildContainerSpec(ContainerSpec.builder()
+                .id("resources").image("alpine").cpuSetCpus("0-1")
+                .memoryReservationBytes(67108864).memoryLimitBytes(134217728)
+                .cpuShares(512).cpuQuotaMicros(50000).cpuPeriodMicros(100000)
+                .cgroupsPath("user.slice:nanofaas:resources").build()));
+        var linux = spec.getFieldsOrThrow("linux").getStructValue();
+        assertThat(linux.getFieldsOrThrow("cgroupsPath").getStringValue()).isEqualTo("user.slice:nanofaas:resources");
+        var resources = linux.getFieldsOrThrow("resources").getStructValue();
+        var cpu = resources.getFieldsOrThrow("cpu").getStructValue();
+        assertThat(cpu.getFieldsOrThrow("cpus").getStringValue()).isEqualTo("0-1");
+        assertThat(cpu.getFieldsOrThrow("shares").getNumberValue()).isEqualTo(512);
+        assertThat(cpu.getFieldsOrThrow("quota").getNumberValue()).isEqualTo(50000);
+        assertThat(cpu.getFieldsOrThrow("period").getNumberValue()).isEqualTo(100000);
+        assertThat(resources.getFieldsOrThrow("memory").getStructValue()
+                .getFieldsOrThrow("reservation").getNumberValue()).isEqualTo(67108864);
+    }
 }

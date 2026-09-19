@@ -1,5 +1,6 @@
 plugins {
     `java-library`
+    `maven-publish`
     application
     jacoco
     id("com.google.protobuf") version "0.9.5"
@@ -13,7 +14,7 @@ plugins {
 }
 
 group = "io.nanofaas"
-version = "0.3.0"
+version = "0.4.0-SNAPSHOT"
 
 val containerdApiVersion = "v2.2.1" // pinned containerd API; bump together with vendored protos
 val grpcVersion = "1.73.0"
@@ -27,6 +28,7 @@ val assertjVersion = "3.27.3"
 val javaxAnnotationVersion = "1.3.2"
 
 repositories {
+    mavenLocal { content { includeGroup("io.libcni") } }
     mavenCentral()
     // libcni-java, for the optional CNI source set. GitHub Packages needs credentials even to
     // read a public package, unlike Maven Central: a token with read:packages. Declared for the
@@ -112,6 +114,10 @@ tasks.withType<JavaCompile>().configureEach {
     options.release.set(javaRelease)
 }
 
+tasks.withType<Test>().configureEach {
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+
 tasks.test {
     useJUnitPlatform()
     finalizedBy(tasks.jacocoTestReport)
@@ -140,7 +146,7 @@ cni.compileClasspath += sourceSets.main.get().output
 cni.runtimeClasspath += sourceSets.main.get().output
 
 dependencies {
-    "cniImplementation"("io.libcni:libcni-java:0.1.0")
+    "cniImplementation"("io.libcni:libcni-java:0.1.1-SNAPSHOT")
     "cniImplementation"("org.slf4j:slf4j-api:$slf4jVersion")
 }
 
@@ -151,6 +157,66 @@ val cniJar = tasks.register<Jar>("cniJar") {
     from(cni.output)
 }
 tasks.named("assemble") { dependsOn(cniJar) }
+
+val cniSourcesJar = tasks.register<Jar>("cniSourcesJar") {
+    archiveBaseName.set("containerd-java-cni")
+    archiveClassifier.set("sources")
+    from(cni.allSource)
+}
+val cniJavadoc = tasks.register<Javadoc>("cniJavadoc") {
+    setDestinationDir(layout.buildDirectory.dir("docs/cniJavadoc").get().asFile)
+    source(cni.allJava)
+    classpath = cni.compileClasspath
+}
+val cniJavadocJar = tasks.register<Jar>("cniJavadocJar") {
+    archiveBaseName.set("containerd-java-cni")
+    archiveClassifier.set("javadoc")
+    from(cniJavadoc)
+}
+publishing {
+    publications {
+        create<MavenPublication>("core") {
+            from(components["java"])
+        }
+        create<MavenPublication>("cni") {
+            artifactId = "containerd-java-cni"
+            artifact(cniJar)
+            artifact(cniSourcesJar)
+            artifact(cniJavadocJar)
+            pom.withXml {
+                val dependencies = asNode().appendNode("dependencies")
+                for ((group, artifact, version) in listOf(
+                    Triple("io.nanofaas", "containerd-java", project.version.toString()),
+                    Triple("io.libcni", "libcni-java", "0.1.1-SNAPSHOT")
+                )) {
+                    dependencies.appendNode("dependency").apply {
+                        appendNode("groupId", group)
+                        appendNode("artifactId", artifact)
+                        appendNode("version", version)
+                        appendNode("scope", "compile")
+                    }
+                }
+            }
+        }
+        withType<MavenPublication>().configureEach {
+            pom {
+                name.set(artifactId)
+                description.set("Java containerd client with recoverable container lifecycle and optional CNI networking")
+                url.set("https://github.com/miciav/containerd-java")
+                licenses { license {
+                    name.set("The Apache License, Version 2.0")
+                    url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
+                } }
+                scm {
+                    connection.set("scm:git:https://github.com/miciav/containerd-java.git")
+                    developerConnection.set("scm:git:ssh://git@github.com/miciav/containerd-java.git")
+                    url.set("https://github.com/miciav/containerd-java")
+                }
+                developers { developer { id.set("miciav"); name.set("Michele") } }
+            }
+        }
+    }
+}
 
 // ---- end-to-end demo application ----
 // Exercises both libraries against a real containerd, and is what the Multipass scenario runs
@@ -205,7 +271,10 @@ val integrationTestTask = tasks.register<Test>("integrationTest") {
     useJUnitPlatform()
     // The CNI tests need root and installed plugins, which the rest do not. Kept out so that a
     // skip in this task still means something is wrong.
-    filter { excludeTestsMatching("io.nanofaas.containerd.Cni*IT") }
+    filter {
+        excludeTestsMatching("io.nanofaas.containerd.Cni*IT")
+        excludeTestsMatching("io.nanofaas.containerd.Rootless*IT")
+    }
     systemProperty("io.nanofaas.containerd.socket", System.getProperty("io.nanofaas.containerd.socket", "/run/containerd/containerd.sock"))
     testLogging { events("failed", "skipped") }
 }
@@ -222,6 +291,18 @@ tasks.register<Test>("cniIntegrationTest") {
     systemProperty("io.nanofaas.containerd.socket",
         System.getProperty("io.nanofaas.containerd.socket", "/run/containerd/containerd.sock"))
     testLogging { events("failed", "skipped") }
+}
+
+tasks.register<Test>("rootlessIntegrationTest") {
+    description = "Verifies delegated cgroup v2 limits against a rootless containerd"
+    group = "verification"
+    testClassesDirs = integrationTest.output.classesDirs
+    classpath = integrationTest.runtimeClasspath
+    useJUnitPlatform()
+    filter { includeTestsMatching("io.nanofaas.containerd.Rootless*IT") }
+    System.getProperties().stringPropertyNames().filter { it.startsWith("io.nanofaas.containerd.") }
+        .forEach { systemProperty(it, System.getProperty(it)) }
+    testLogging { events("failed", "skipped", "passed") }
 }
 
 application {
@@ -294,6 +375,7 @@ tasks.named<JavaExec>("run") {
 // gRPC, Netty and protobuf, plus the mkfifo downcall.
 graalvmNative {
     binaries {
+        named("test") { buildArgs.add("--enable-native-access=ALL-UNNAMED") }
         named("main") {
             imageName.set("containerd-java-example")
             mainClass.set("io.nanofaas.containerd.example.Example")

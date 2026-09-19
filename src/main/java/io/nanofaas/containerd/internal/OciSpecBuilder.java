@@ -279,8 +279,10 @@ public final class OciSpecBuilder {
                 .putFields("maskedPaths", stringListValue(DEFAULT_MASKED_PATHS))
                 .putFields("readonlyPaths", stringListValue(DEFAULT_READONLY_PATHS));
 
+        if (spec.cgroupsPath() != null) linux.putFields("cgroupsPath", stringValue(spec.cgroupsPath()));
         Struct.Builder resources = Struct.newBuilder();
         Struct.Builder cpu = Struct.newBuilder();
+        if (spec.cpuSetCpus() != null) cpu.putFields("cpus", stringValue(spec.cpuSetCpus()));
         if (spec.cpuShares() > 0) {
             cpu.putFields("shares", numberValue(spec.cpuShares()));
         }
@@ -294,6 +296,7 @@ public final class OciSpecBuilder {
             resources.putFields("cpu", structValue(cpu.build()));
         }
         Struct.Builder memory = Struct.newBuilder();
+        if (spec.memoryReservationBytes() > 0) memory.putFields("reservation", numberValue(spec.memoryReservationBytes()));
         if (spec.memoryLimitBytes() > 0) {
             memory.putFields("limit", numberValue(spec.memoryLimitBytes()));
         }

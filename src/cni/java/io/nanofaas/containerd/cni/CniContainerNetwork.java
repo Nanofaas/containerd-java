@@ -58,6 +58,7 @@ public final class CniContainerNetwork implements ContainerNetwork {
                 new DefaultExec(b.pluginTimeout.toMillis()));
     }
 
+    /** {@return a builder using the default CNI paths and interface name} */
     public static Builder builder() {
         return new Builder();
     }
@@ -168,7 +169,7 @@ public final class CniContainerNetwork implements ContainerNetwork {
         /**
          * Where the CNI plugin binaries live.
          *
-         * @param pluginDir plugin directory; defaults to {@value #DEFAULT_PLUGIN_DIR}
+         * @param pluginDir plugin directory; defaults to {@link #DEFAULT_PLUGIN_DIR}
          * @return this builder
          */
         public Builder pluginDir(Path pluginDir) {
@@ -179,7 +180,7 @@ public final class CniContainerNetwork implements ContainerNetwork {
         /**
          * Where the network configurations live.
          *
-         * @param configDir configuration directory; defaults to {@value #DEFAULT_CONFIG_DIR}
+         * @param configDir configuration directory; defaults to {@link #DEFAULT_CONFIG_DIR}
          * @return this builder
          */
         public Builder configDir(Path configDir) {

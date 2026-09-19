@@ -13,9 +13,8 @@ concurrency:
 
 permissions:
   contents: read
-  # libcni-java is resolved from GitHub Packages, which needs a token even to read a public
-  # package. Deliberately not checked out next door: CI exercises the path every other consumer
-  # takes, so a broken publish is caught here rather than by them.
+  # GitHub Packages remains available for published dependencies. The companion libcni-java
+  # snapshot is built from an immutable revision below until it is published.
   packages: read
 
 jobs:
@@ -27,6 +26,13 @@ jobs:
         with:
           path: containerd-java
 
+      - name: Check out the companion libcni-java snapshot
+        uses: actions/checkout@v7
+        with:
+          repository: miciav/libcni-java
+          ref: b0d0484970fba0f1d38e1983be67a6bb0e73e3cd
+          path: libcni-java
+
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -36,6 +42,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
         with:
           build-root-directory: containerd-java
+
+      - name: Install the companion libcni-java snapshot
+        working-directory: libcni-java
+        run: ./gradlew publishToMavenLocal --stacktrace
 
       - name: Build and run unit tests
         working-directory: containerd-java
@@ -60,6 +70,13 @@ jobs:
         with:
           path: containerd-java
 
+      - name: Check out the companion libcni-java snapshot
+        uses: actions/checkout@v7
+        with:
+          repository: miciav/libcni-java
+          ref: b0d0484970fba0f1d38e1983be67a6bb0e73e3cd
+          path: libcni-java
+
       # GraalVM rather than a plain JDK: it is a JDK 25 like any other for the integration tests,
       # and it also carries native-image, so one job covers both without installing containerd twice.
       - uses: graalvm/setup-graalvm@v1
@@ -71,6 +88,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
         with:
           build-root-directory: containerd-java
+
+      - name: Install the companion libcni-java snapshot
+        working-directory: libcni-java
+        run: ./gradlew publishToMavenLocal --stacktrace
 
       # The runner ships containerd 1.7.x with Docker. This library targets the 2.x API and is
       # pinned to a specific version in build.gradle.kts, so install exactly that one rather
@@ -189,8 +210,8 @@ jobs:
       - name: Run the CNI networking tests
         working-directory: containerd-java
         # Root, and a Gradle home of its own so it does not take ownership of the runner user's.
-        # -E so root keeps the credentials that resolve libcni-java.
-        run: sudo -E ./gradlew -g /tmp/gradle-root cniIntegrationTest --stacktrace
+        # Keep credentials and resolve the companion snapshot from the runner's Maven repository.
+        run: sudo -E ./gradlew -g /tmp/gradle-root -Dmaven.repo.local="$HOME/.m2/repository" cniIntegrationTest --stacktrace
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

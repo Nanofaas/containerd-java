@@ -115,4 +115,14 @@ class TasksServiceImplTest {
             assertThat(fake.created.get()).isNotNull();
         }
     }
+
+    @Test
+    void createPassesSystemdCgroupToShimWithoutRequiringABinaryOverride() throws Exception {
+        try (var fake = new FakeTaskServer()) {
+            new TasksServiceImpl(fake.channel, null, true).create("abc");
+            var options = containerd.runc.v1.Options.parseFrom(fake.created.get().getOptions().getValue());
+            assertThat(options.getSystemdCgroup()).isTrue();
+            assertThat(options.getBinaryName()).isEmpty();
+        }
+    }
 }

@@ -36,6 +36,9 @@ public final class ContainerSpec {
     private final boolean readonlyRootfs;
     private final boolean hostNetwork;
     private final List<MountSpec> mounts;
+    private final String cpuSetCpus;
+    private final String cgroupsPath;
+    private final long memoryReservationBytes;
     private final long cpuShares;
     private final long cpuQuotaMicros;
     private final long cpuPeriodMicros;
@@ -58,6 +61,9 @@ public final class ContainerSpec {
         this.readonlyRootfs = b.readonlyRootfs;
         this.hostNetwork = b.hostNetwork;
         this.mounts = List.copyOf(b.mounts);
+        this.cpuSetCpus = b.cpuSetCpus;
+        this.cgroupsPath = b.cgroupsPath;
+        this.memoryReservationBytes = b.memoryReservationBytes;
         this.cpuShares = b.cpuShares;
         this.cpuQuotaMicros = b.cpuQuotaMicros;
         this.cpuPeriodMicros = b.cpuPeriodMicros;
@@ -106,6 +112,13 @@ public final class ContainerSpec {
     public long memoryLimitBytes() { return memoryLimitBytes; }
     /** {@return the combined memory + swap limit in bytes; 0 leaves it unset} */
     public long memorySwapLimitBytes() { return memorySwapLimitBytes; }
+    /** {@return the allowed CPU list, or null to inherit it} */
+    public String cpuSetCpus() { return cpuSetCpus; }
+    /** {@return the OCI cgroup path, or null for the runtime default} */
+    public String cgroupsPath() { return cgroupsPath; }
+    /** {@return the memory reservation in bytes; 0 leaves it unset} */
+    public long memoryReservationBytes() { return memoryReservationBytes; }
+
     /** {@return the maximum number of processes in the container; 0 leaves it unset} */
     public long pidsLimit() { return pidsLimit; }
     /** {@return the RLIMIT_NOFILE the container's process runs with} */
@@ -134,6 +147,9 @@ public final class ContainerSpec {
         private boolean readonlyRootfs;
         private boolean hostNetwork;
         private List<MountSpec> mounts = List.of();
+        private String cpuSetCpus;
+        private String cgroupsPath;
+        private long memoryReservationBytes;
         private long cpuShares;
         private long cpuQuotaMicros;
         private long cpuPeriodMicros;
@@ -231,6 +247,28 @@ public final class ContainerSpec {
          * @return this builder
          */
         public Builder cpuShares(long cpuShares) { this.cpuShares = cpuShares; return this; }
+
+        /**
+         * Sets the CPU affinity list understood by the OCI runtime.
+         * @param cpus Linux CPU list, such as 0-2,4; null leaves it unset
+         * @return this builder
+         */
+        public Builder cpuSetCpus(String cpus) { this.cpuSetCpus = cpus; return this; }
+
+        /**
+         * Sets the cgroup path; with systemd use slice:prefix:name.
+         * @param path OCI cgroup path, or null for the runtime default
+         * @return this builder
+         */
+        public Builder cgroupsPath(String path) { this.cgroupsPath = path; return this; }
+
+        /**
+         * Sets the memory reservation (memory.low on cgroup v2).
+         * @param bytes reservation in bytes; 0 leaves it unset
+         * @return this builder
+         */
+        public Builder memoryReservationBytes(long bytes) { this.memoryReservationBytes = bytes; return this; }
+
         /**
          * Sets the CFS quota: microseconds of CPU time per period.
          *
