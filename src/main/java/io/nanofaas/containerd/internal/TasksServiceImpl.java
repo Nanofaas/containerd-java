@@ -19,12 +19,18 @@ public final class TasksServiceImpl implements Tasks {
     private final containerd.services.containers.v1.ContainersGrpc.ContainersBlockingStub containers;
     private final SnapshotManager snapshots;
     private final String runtimeBinaryName;
+    private final boolean systemdCgroup;
 
     public TasksServiceImpl(ManagedChannel channel) {
         this(channel, null);
     }
 
     public TasksServiceImpl(ManagedChannel channel, String runtimeBinaryName) {
+        this(channel, runtimeBinaryName, false);
+    }
+
+    public TasksServiceImpl(ManagedChannel channel, String runtimeBinaryName, boolean systemdCgroup) {
+        this.systemdCgroup = systemdCgroup;
         this.stub = containerd.services.tasks.v1.TasksGrpc.newBlockingStub(channel);
         this.containers = containerd.services.containers.v1.ContainersGrpc.newBlockingStub(channel);
         this.snapshots = new SnapshotManager(channel);
@@ -61,9 +67,10 @@ public final class TasksServiceImpl implements Tasks {
             String uri = "file://" + logPath;
             request.setStdout(uri).setStderr(uri);
         }
-        if (runtimeBinaryName != null) {
-            request.setOptions(TypeUrls.pack(containerd.runc.v1.Options.newBuilder()
-                    .setBinaryName(runtimeBinaryName).build()));
+        if (runtimeBinaryName != null || systemdCgroup) {
+            var options = containerd.runc.v1.Options.newBuilder().setSystemdCgroup(systemdCgroup);
+            if (runtimeBinaryName != null) options.setBinaryName(runtimeBinaryName);
+            request.setOptions(TypeUrls.pack(options.build()));
         }
         try {
             stub.create(request.build());

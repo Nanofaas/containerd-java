@@ -51,9 +51,19 @@ public final class DefaultContainerdClient implements ContainerdClient {
                                    java.time.Duration stopTimeout,
                                    io.nanofaas.containerd.spi.ContainerNetwork network,
                                    java.nio.file.Path stateDirectory) {
+        this(socketPath, namespace, snapshotter, runtimeName, runtimeBinaryName, stopTimeout, network,
+                stateDirectory, false);
+    }
+
+    public DefaultContainerdClient(String socketPath, String namespace, String snapshotter,
+                                   String runtimeName, String runtimeBinaryName,
+                                   java.time.Duration stopTimeout,
+                                   io.nanofaas.containerd.spi.ContainerNetwork network,
+                                   java.nio.file.Path stateDirectory, boolean systemdCgroup) {
         // Null from the builder means the caller expressed no preference.
         java.nio.file.Path state = stateDirectory == null
                 ? ContainersServiceImpl.DEFAULT_STATE_DIR : stateDirectory;
+        state = scopedStateDirectory(state, socketPath, namespace);
         this.namespace = namespace;
         this.snapshotter = snapshotter;
         this.runtimeName = runtimeName;
@@ -67,9 +77,20 @@ public final class DefaultContainerdClient implements ContainerdClient {
         // final field rules that out; building it here is free — it only constructs gRPC stubs).
         this.images = new ImagesServiceImpl(channel, snapshotter);
         this.containers = new ContainersServiceImpl(channel, snapshotter, runtimeName, runtimeBinaryName, stopTimeout,
-                network, state);
-        this.tasks = new TasksServiceImpl(channel, runtimeBinaryName);
+                network, state, systemdCgroup);
+        this.tasks = new TasksServiceImpl(channel, runtimeBinaryName, systemdCgroup);
         this.events = new EventsServiceImpl(channel, namespace);
+    }
+
+    private static java.nio.file.Path scopedStateDirectory(java.nio.file.Path root, String socket, String namespace) {
+        String identity = java.nio.file.Path.of(socket).toAbsolutePath().normalize() + "\0" + namespace;
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(identity.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return root.resolve("scope-" + java.util.HexFormat.of().formatHex(digest));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required by the Java platform", e);
+        }
     }
 
     @Override

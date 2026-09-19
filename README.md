@@ -517,3 +517,64 @@ Apache License 2.0 — see [LICENSE](LICENSE).
 The Protocol Buffers definitions under `src/main/proto/github.com/containerd/` are vendored
 verbatim from containerd v2.2.1 and remain copyright The containerd Authors, under the same
 licence. See [NOTICE](NOTICE).
+
+
+## Recoverable lifecycle (0.4.0-SNAPSHOT)
+
+Published Maven coordinates are `io.nanofaas:containerd-java:0.4.0-SNAPSHOT` (core) and
+`io.nanofaas:containerd-java-cni:0.4.0-SNAPSHOT` (core plus `io.libcni:libcni-java:0.1.0`
+transitively). Both include source/Javadoc artifacts; native reachability metadata ships in core
+and in the transitive libcni artifact. No remote repository is configured for publication here.
+
+For a local source build with the sibling libcni checkout:
+
+```sh
+(cd ../libcni-java && ./gradlew publishToMavenLocal)
+./gradlew test publishToMavenLocal -PlibcniFromPackages=true
+```
+
+Consumers need only the CNI coordinate when networking is required:
+
+```groovy
+dependencies { implementation 'io.nanofaas:containerd-java-cni:0.4.0-SNAPSHOT' }
+```
+
+Choose a persistent `ContainerdClient.builder().stateDirectory(path)`. The client scopes files as
+`path/scope-<sha256>/container-id/`, hashing the normalized absolute daemon socket path, a NUL
+separator, and the namespace. Reuse all three settings after restart; use the same spelling for
+socket symlinks. The directory contains `resolv.conf` and an atomically replaced, fsynced
+`lifecycle.properties` record. Upgrading from older versions preserves cleanup through daemon
+labels, but attachments allocated before this version cannot be reconstructed.
+
+`containers().networkAttachment(id)` returns the last durable allocation, or `null` when no
+attachment completed or after successful detach. Daemon read errors propagate rather than
+appearing as an absent allocation. `pendingRemovals()` reads durable container identities, labels,
+and snapshot keys even after daemon metadata disappeared. These entries are cleanup work, not
+healthy containers. Retry `remove(id, options)` on each owned entry; an earlier request to remove
+the snapshot is remembered even if the retry uses default options. Failed DEL, task deletion,
+snapshot removal and state cleanup are reported; independent cleanup steps are still attempted.
+The first failure is retained and later failures are suppressed. Reusing an id with pending
+cleanup is refused. Serialize lifecycle operations for a given container id across clients.
+
+Rootless systemd cgroups require both `.systemdCgroup(true)` on the **client** (shim option) and
+`.cgroupsPath("user.slice:nanofaas:my-container")` on the **spec**, adjusted for the delegated slice.
+CRI plugin configuration does not configure these native gRPC calls. Specs also accept
+`.cpuSetCpus("0-1")` and `.memoryReservationBytes(67108864)` alongside the existing quota, period,
+shares and hard memory limit options. Actual controller delegation is an environment requirement.
+
+Run the live check inside the rootless daemon's namespaces, where its returned PIDs are visible:
+
+```sh
+./gradlew rootlessIntegrationTest \
+  -Dio.nanofaas.containerd.socket=/run/user/1000/containerd/containerd.sock \
+  -Dio.nanofaas.containerd.snapshotter=native \
+  -Dio.nanofaas.containerd.runtimeBinaryName=crun \
+  -Dio.nanofaas.containerd.cpus=0 \
+  -Dio.nanofaas.containerd.cgroupSlice=user.slice
+```
+
+This separate task fails on missing setup or ineffective cgroup v2 limits; it does not skip.
+The regular `test` suite covers durable cleanup and namespace isolation and can also run as
+`nativeTest` with GraalVM. JVM tests and published metadata alone do not establish live rootless
+or native runtime correctness. For reproducible CI, build pinned library commits or released
+versions instead of using mutable snapshots as the only source.

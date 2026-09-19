@@ -15,6 +15,7 @@ final class ContainerdClientBuilder implements ContainerdClient.Builder {
     private String snapshotter = "overlayfs";
     private String runtimeName = "io.containerd.runc.v2";
     private String runtimeBinaryName;
+    private boolean systemdCgroup;
     private java.time.Duration stopTimeout = java.time.Duration.ofSeconds(10);
     private ContainerNetwork network;
     // Null means "the client's default": the default belongs with the code that uses it, not
@@ -52,6 +53,12 @@ final class ContainerdClientBuilder implements ContainerdClient.Builder {
     }
 
     @Override
+    public ContainerdClient.Builder systemdCgroup(boolean enabled) {
+        this.systemdCgroup = enabled;
+        return this;
+    }
+
+    @Override
     public ContainerdClient.Builder stopTimeout(java.time.Duration stopTimeout) {
         Objects.requireNonNull(stopTimeout, "stopTimeout");
         if (stopTimeout.isNegative() || stopTimeout.isZero()) {
@@ -76,6 +83,6 @@ final class ContainerdClientBuilder implements ContainerdClient.Builder {
     @Override
     public ContainerdClient build() {
         return new DefaultContainerdClient(socketPath, namespace, snapshotter, runtimeName,
-                runtimeBinaryName, stopTimeout, network, stateDirectory);
+                runtimeBinaryName, stopTimeout, network, stateDirectory, systemdCgroup);
     }
 }

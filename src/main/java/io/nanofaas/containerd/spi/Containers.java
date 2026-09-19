@@ -22,6 +22,17 @@ public interface Containers {
     Container create(ContainerSpec spec);
 
     /**
+     * Reads the last durable network allocation, including after a client restart.
+     * @param id container id
+     * @return the allocation, or null if no attachment has completed or it was detached
+     * @throws ContainerdException if the daemon or durable state cannot be read
+     */
+    NetworkAttachment networkAttachment(String id);
+
+    /** {@return durable identities of incomplete cleanup operations, even without daemon metadata} */
+    List<Container> pendingRemovals();
+
+    /**
      * Combined view of the container metadata and its task state, if any.
      *
      * @param id container id

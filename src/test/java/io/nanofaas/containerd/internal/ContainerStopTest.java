@@ -38,6 +38,15 @@ class ContainerStopTest {
         WedgedTask() throws Exception {
             String name = InProcessServerBuilder.generateName();
             this.server = InProcessServerBuilder.forName(name)
+                    .addService(new containerd.services.containers.v1.ContainersGrpc.ContainersImplBase() {
+                        @Override
+                        public void get(containerd.services.containers.v1.GetContainerRequest request,
+                                        StreamObserver<containerd.services.containers.v1.GetContainerResponse> o) {
+                            o.onNext(containerd.services.containers.v1.GetContainerResponse.newBuilder()
+                                    .setContainer(containerd.services.containers.v1.Container.newBuilder().setId(request.getId())).build());
+                            o.onCompleted();
+                        }
+                    })
                     .addService(containerd.services.tasks.v1.TasksGrpc.bindService(
                             new containerd.services.tasks.v1.TasksGrpc.TasksImplBase() {
                                 @Override

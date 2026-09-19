@@ -35,6 +35,7 @@ class ContainersServiceImplTest {
         final AtomicInteger snapshotsRemoved = new AtomicInteger();
         final AtomicReference<containerd.services.containers.v1.Container> created = new AtomicReference<>();
         volatile boolean failContainerCreate;
+        Runnable afterCreate = () -> {};
 
         final io.grpc.Server server;
         final io.grpc.ManagedChannel channel;
@@ -112,6 +113,7 @@ class ContainersServiceImplTest {
                                 return;
                             }
                             created.set(request.getContainer());
+                            afterCreate.run();
                             responseObserver.onNext(containerd.services.containers.v1.CreateContainerResponse.newBuilder()
                                     .setContainer(request.getContainer()).build());
                             responseObserver.onCompleted();
@@ -208,6 +210,23 @@ class ContainersServiceImplTest {
             assertThat(fake.snapshotsRemoved.get())
                     .as("the prepared snapshot must not be left behind")
                     .isEqualTo(1);
+        }
+    }
+
+    @Test
+    void journalWriteFailureAfterMetadataCreationKeepsSnapshotOwnedByContainer() throws Exception {
+        var root = java.nio.file.Files.createTempDirectory("journal-create-failure");
+        var state = root.resolve("state");
+        try (var fake = new FakeServer()) {
+            fake.afterCreate = () -> {
+                try { java.nio.file.Files.createFile(state); }
+                catch (java.io.IOException e) { throw new java.io.UncheckedIOException(e); }
+            };
+            var containers = new ContainersServiceImpl(fake.channel, "overlayfs", "io.containerd.runc.v2", null,
+                    java.time.Duration.ofSeconds(1), null, state);
+            assertThatThrownBy(() -> containers.create(spec())).isInstanceOf(io.nanofaas.containerd.ContainerdException.class);
+            assertThat(fake.created.get()).isNotNull();
+            assertThat(fake.snapshotsRemoved.get()).as("daemon metadata still references this snapshot").isZero();
         }
     }
 }

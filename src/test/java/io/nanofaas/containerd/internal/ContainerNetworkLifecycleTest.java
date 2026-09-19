@@ -79,6 +79,9 @@ class ContainerNetworkLifecycleTest {
         volatile containerd.services.containers.v1.Container stored;
         volatile containerd.v1.types.Status taskStatus = containerd.v1.types.Status.RUNNING;
         volatile boolean taskExists;
+        volatile boolean failSnapshotRemove;
+        volatile boolean snapshotExists;
+        volatile boolean unavailable;
 
         FakeContainerd() throws Exception {
             String name = InProcessServerBuilder.generateName();
@@ -131,6 +134,7 @@ class ContainerNetworkLifecycleTest {
                         @Override
                         public void prepare(containerd.services.snapshots.v1.PrepareSnapshotRequest request,
                                             StreamObserver<containerd.services.snapshots.v1.PrepareSnapshotResponse> o) {
+                            snapshotExists = true;
                             o.onNext(containerd.services.snapshots.v1.PrepareSnapshotResponse
                                     .getDefaultInstance());
                             o.onCompleted();
@@ -147,6 +151,11 @@ class ContainerNetworkLifecycleTest {
                         @Override
                         public void remove(containerd.services.snapshots.v1.RemoveSnapshotRequest request,
                                            StreamObserver<com.google.protobuf.Empty> o) {
+                            if (failSnapshotRemove) {
+                                o.onError(Status.INTERNAL.withDescription("snapshot busy").asRuntimeException());
+                                return;
+                            }
+                            snapshotExists = false;
                             o.onNext(com.google.protobuf.Empty.getDefaultInstance());
                             o.onCompleted();
                         }
@@ -166,6 +175,10 @@ class ContainerNetworkLifecycleTest {
                         @Override
                         public void get(containerd.services.containers.v1.GetContainerRequest request,
                                         StreamObserver<containerd.services.containers.v1.GetContainerResponse> o) {
+                            if (unavailable) {
+                                o.onError(Status.UNAVAILABLE.asRuntimeException());
+                                return;
+                            }
                             if (stored == null) {
                                 o.onError(Status.NOT_FOUND.asRuntimeException());
                                 return;
@@ -178,6 +191,7 @@ class ContainerNetworkLifecycleTest {
                         @Override
                         public void delete(containerd.services.containers.v1.DeleteContainerRequest request,
                                            StreamObserver<com.google.protobuf.Empty> o) {
+                            stored = null;
                             o.onNext(com.google.protobuf.Empty.getDefaultInstance());
                             o.onCompleted();
                         }
@@ -256,9 +270,12 @@ class ContainerNetworkLifecycleTest {
         }
     }
 
-    private static ContainersServiceImpl service(FakeContainerd fake, ContainerNetwork network) {
+    @org.junit.jupiter.api.io.TempDir
+    java.nio.file.Path state;
+
+    private ContainersServiceImpl service(FakeContainerd fake, ContainerNetwork network) {
         return new ContainersServiceImpl(fake.channel, "overlayfs", "io.containerd.runc.v2", null,
-                java.time.Duration.ofSeconds(1), network, ContainersServiceImpl.DEFAULT_STATE_DIR);
+                java.time.Duration.ofSeconds(1), network, state);
     }
 
     private static ContainersServiceImpl service(FakeContainerd fake, ContainerNetwork network,
@@ -324,7 +341,7 @@ class ContainerNetworkLifecycleTest {
     }
 
     @Test
-    void aFailingDetachDoesNotBreakTheStopItWasPartOf() throws Exception {
+    void aFailingDetachIsReportedAfterStoppingTheTask() throws Exception {
         try (var fake = new FakeContainerd()) {
             var net = new RecordingNetwork(fake.events);
             net.failDetach = true;
@@ -332,8 +349,9 @@ class ContainerNetworkLifecycleTest {
             containers.create(networked());
             containers.start("net-1");
 
-            // The caller is already tearing down; a networking failure must not replace that.
-            assertThat(containers.stop("net-1")).isPresent();
+            assertThatThrownBy(() -> containers.stop("net-1"))
+                    .isInstanceOf(ContainerdException.class);
+            assertThat(fake.taskExists).isFalse();
             assertThat(fake.events).contains("kill:15");
         }
     }
@@ -495,6 +513,127 @@ class ContainerNetworkLifecycleTest {
             assertThatThrownBy(() -> containers.create(spec))
                     .isInstanceOf(ContainerdException.class)
                     .hasMessageContaining("stateDirectory");
+        }
+    }
+
+    @Test
+    void attachmentSurvivesClientRestart() throws Exception {
+        try (var fake = new FakeContainerd()) {
+            var net = new RecordingNetwork(fake.events);
+            net.attachment = new NetworkAttachment(List.of("10.90.0.2/24"), List.of("10.90.0.1"),
+                    List.of("1.1.1.1"), List.of("test.local"), "test.local");
+            var containers = service(fake, net);
+            containers.create(networked());
+            containers.start("net-1");
+            containers.close();
+            assertThat(service(fake, net).networkAttachment("net-1")).isEqualTo(net.attachment);
+        }
+    }
+
+    @Test
+    void failedDetachRemainsDiscoverableWithNoTaskOrDaemonMetadata() throws Exception {
+        try (var fake = new FakeContainerd()) {
+            var net = new RecordingNetwork(fake.events);
+            var containers = service(fake, net);
+            containers.create(networked());
+            containers.start("net-1");
+            fake.taskExists = false;
+            net.failDetach = true;
+            var remove = RemoveOptions.builder().force(true).removeSnapshot(true).build();
+            assertThatThrownBy(() -> containers.remove("net-1", remove)).isInstanceOf(ContainerdException.class);
+            assertThat(fake.stored).isNull();
+            assertThat(fake.snapshotExists).isFalse();
+            var restarted = service(fake, net);
+            assertThat(restarted.pendingRemovals()).extracting(io.nanofaas.containerd.Container::id).containsExactly("net-1");
+            assertThat(restarted.pendingRemovals().getFirst().labels()).containsEntry(ContainersServiceImpl.NETWORK_LABEL, "mynet");
+            net.failDetach = false;
+            restarted.remove("net-1", remove);
+            restarted.remove("net-1", remove);
+            assertThat(restarted.pendingRemovals()).isEmpty();
+            assertThat(state.resolve("net-1")).doesNotExist();
+        }
+    }
+
+    @Test
+    void failedSnapshotRemovalSurvivesMetadataDeletionAndClientRestart() throws Exception {
+        try (var fake = new FakeContainerd()) {
+            var net = new RecordingNetwork(fake.events);
+            var containers = service(fake, net);
+            containers.create(networked());
+            fake.failSnapshotRemove = true;
+            var remove = RemoveOptions.builder().removeSnapshot(true).build();
+            assertThatThrownBy(() -> containers.remove("net-1", remove)).isInstanceOf(ContainerdException.class);
+            assertThat(fake.stored).isNull();
+            var restarted = service(fake, net);
+            assertThat(restarted.pendingRemovals()).extracting(io.nanofaas.containerd.Container::snapshotKey).containsExactly("net-1");
+            fake.failSnapshotRemove = false;
+            restarted.remove("net-1", RemoveOptions.builder().build());
+            assertThat(fake.snapshotExists).isFalse();
+            assertThat(restarted.pendingRemovals()).isEmpty();
+        }
+    }
+
+    @Test
+    void partialAddKeepsPrimaryFailureAndJournalUntilDetachCanSucceed() throws Exception {
+        try (var fake = new FakeContainerd()) {
+            var net = new RecordingNetwork(fake.events);
+            var containers = service(fake, net);
+            containers.create(networked());
+            net.failAttach = true;
+            net.failDetach = true;
+            assertThatThrownBy(() -> containers.start("net-1"))
+                    .isInstanceOf(ContainerStartException.class)
+                    .hasRootCauseMessage("no address left in the pool")
+                    .satisfies(error -> assertThat(error.getCause().getSuppressed()).hasSize(1));
+            assertThat(fake.taskExists).isFalse();
+            assertThat(service(fake, net).pendingRemovals()).extracting(io.nanofaas.containerd.Container::id).containsExactly("net-1");
+            net.failDetach = false;
+            containers.remove("net-1", RemoveOptions.builder().removeSnapshot(true).build());
+            assertThat(containers.pendingRemovals()).isEmpty();
+        }
+    }
+
+    @Test
+    void metadataGoneBeforeRemoveStillUsesDurableNetworkAndSnapshotIdentity() throws Exception {
+        try (var fake = new FakeContainerd()) {
+            var net = new RecordingNetwork(fake.events);
+            var containers = service(fake, net);
+            containers.create(networked());
+            containers.start("net-1");
+            fake.stored = null;
+            fake.taskExists = false;
+            containers.remove("net-1", RemoveOptions.builder().removeSnapshot(true).build());
+            assertThat(fake.events).contains("detach:mynet:-1");
+            assertThat(fake.snapshotExists).isFalse();
+            assertThat(state.resolve("net-1")).doesNotExist();
+        }
+    }
+
+    @Test
+    void unavailableDaemonIsNotAnAbsentAttachment() throws Exception {
+        try (var fake = new FakeContainerd()) {
+            var containers = service(fake, new RecordingNetwork(fake.events));
+            containers.create(networked());
+            assertThat(containers.networkAttachment("net-1")).isNull();
+            fake.unavailable = true;
+            assertThatThrownBy(() -> containers.networkAttachment("net-1")).isInstanceOf(ContainerdException.class);
+        }
+    }
+
+    @Test
+    void pendingCleanupCannotBeOverwrittenByCreateOrStart() throws Exception {
+        try (var fake = new FakeContainerd()) {
+            var net = new RecordingNetwork(fake.events);
+            var containers = service(fake, net);
+            containers.create(networked());
+            containers.start("net-1");
+            net.failDetach = true;
+            assertThatThrownBy(() -> containers.remove("net-1", RemoveOptions.builder().force(true).build()))
+                    .isInstanceOf(ContainerdException.class);
+            assertThatThrownBy(() -> containers.create(networked())).isInstanceOf(ContainerdException.class)
+                    .hasMessageContaining("pending cleanup");
+            assertThatThrownBy(() -> containers.start("net-1")).isInstanceOf(ContainerdException.class)
+                    .hasMessageContaining("pending cleanup");
         }
     }
 }
