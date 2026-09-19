@@ -522,7 +522,7 @@ licence. See [NOTICE](NOTICE).
 ## Recoverable lifecycle (0.4.0-SNAPSHOT)
 
 Published Maven coordinates are `io.nanofaas:containerd-java:0.4.0-SNAPSHOT` (core) and
-`io.nanofaas:containerd-java-cni:0.4.0-SNAPSHOT` (core plus `io.libcni:libcni-java:0.1.0`
+`io.nanofaas:containerd-java-cni:0.4.0-SNAPSHOT` (core plus `io.libcni:libcni-java:0.1.1-SNAPSHOT`
 transitively). Both include source/Javadoc artifacts; native reachability metadata ships in core
 and in the transitive libcni artifact. No remote repository is configured for publication here.
 

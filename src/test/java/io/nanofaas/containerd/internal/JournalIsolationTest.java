@@ -57,6 +57,11 @@ class JournalIsolationTest {
                     }
                 })
                 .addService(new containerd.services.tasks.v1.TasksGrpc.TasksImplBase() {
+                    @Override public void list(containerd.services.tasks.v1.ListTasksRequest request,
+                            StreamObserver<containerd.services.tasks.v1.ListTasksResponse> o) {
+                        o.onNext(containerd.services.tasks.v1.ListTasksResponse.getDefaultInstance());
+                        o.onCompleted();
+                    }
                     @Override public void get(containerd.services.tasks.v1.GetRequest request,
                             StreamObserver<containerd.services.tasks.v1.GetResponse> o) {
                         o.onError(Status.NOT_FOUND.asRuntimeException());

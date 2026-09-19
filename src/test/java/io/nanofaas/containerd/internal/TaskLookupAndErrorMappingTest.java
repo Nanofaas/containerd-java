@@ -51,7 +51,7 @@ class TaskLookupAndErrorMappingTest {
                                     }
                                     o.onNext(containerd.services.tasks.v1.GetResponse.newBuilder()
                                             .setProcess(containerd.v1.types.Process.newBuilder()
-                                                    .setContainerId(request.getContainerId())
+                                                    .setId(request.getContainerId())
                                                     .setPid(4242)
                                                     .setStatus(containerd.v1.types.Status.RUNNING))
                                             .build());

@@ -146,7 +146,7 @@ cni.compileClasspath += sourceSets.main.get().output
 cni.runtimeClasspath += sourceSets.main.get().output
 
 dependencies {
-    "cniImplementation"("io.libcni:libcni-java:0.1.0")
+    "cniImplementation"("io.libcni:libcni-java:0.1.1-SNAPSHOT")
     "cniImplementation"("org.slf4j:slf4j-api:$slf4jVersion")
 }
 
@@ -187,7 +187,7 @@ publishing {
                 val dependencies = asNode().appendNode("dependencies")
                 for ((group, artifact, version) in listOf(
                     Triple("io.nanofaas", "containerd-java", project.version.toString()),
-                    Triple("io.libcni", "libcni-java", "0.1.0")
+                    Triple("io.libcni", "libcni-java", "0.1.1-SNAPSHOT")
                 )) {
                     dependencies.appendNode("dependency").apply {
                         appendNode("groupId", group)

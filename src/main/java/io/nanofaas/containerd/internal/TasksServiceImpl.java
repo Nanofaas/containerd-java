@@ -183,7 +183,7 @@ public final class TasksServiceImpl implements Tasks {
     }
 
     private static TaskInfo toTaskInfo(containerd.v1.types.Process process) {
-        return new TaskInfo(process.getContainerId(), process.getPid(),
+        return new TaskInfo(process.getContainerId().isEmpty() ? process.getId() : process.getContainerId(), process.getPid(),
                 ProtoMapper.mapStatus(process.getStatus()), process.getExitStatus(),
                 process.hasExitedAt() ? instant(process.getExitedAt()) : null);
     }

@@ -85,6 +85,8 @@ class ContainerNetworkLifecycleTest {
         volatile boolean failTaskLookup;
         volatile boolean rejectTaskCreate;
         volatile boolean failTaskStart;
+        volatile boolean deadlineOnWait;
+        volatile boolean failTaskDelete;
 
         FakeContainerd() throws Exception {
             String name = InProcessServerBuilder.generateName();
@@ -241,7 +243,7 @@ class ContainerNetworkLifecycleTest {
                                 o.onError(Status.INTERNAL.withDescription("shim died").asRuntimeException());
                                 return;
                             }
-                            if (!taskExists) {
+                            if (!taskExists || stored == null) {
                                 o.onError(Status.NOT_FOUND.asRuntimeException());
                                 return;
                             }
@@ -254,9 +256,22 @@ class ContainerNetworkLifecycleTest {
                         }
 
                         @Override
+                        public void list(containerd.services.tasks.v1.ListTasksRequest request,
+                                         StreamObserver<containerd.services.tasks.v1.ListTasksResponse> o) {
+                            var result = containerd.services.tasks.v1.ListTasksResponse.newBuilder();
+                            if (taskExists) result.addTasks(containerd.v1.types.Process.newBuilder()
+                                    .setId("net-1").setPid(PID).setStatus(taskStatus));
+                            o.onNext(result.build());
+                            o.onCompleted();
+                        }
+
+                        @Override
                         public void kill(containerd.services.tasks.v1.KillRequest request,
                                          StreamObserver<com.google.protobuf.Empty> o) {
                             events.add("kill:" + request.getSignal());
+                            if (request.getSignal() == 9 || !deadlineOnWait) {
+                                taskStatus = containerd.v1.types.Status.STOPPED;
+                            }
                             o.onNext(com.google.protobuf.Empty.getDefaultInstance());
                             o.onCompleted();
                         }
@@ -264,6 +279,10 @@ class ContainerNetworkLifecycleTest {
                         @Override
                         public void wait(containerd.services.tasks.v1.WaitRequest request,
                                          StreamObserver<containerd.services.tasks.v1.WaitResponse> o) {
+                            if (deadlineOnWait) {
+                                o.onError(Status.DEADLINE_EXCEEDED.asRuntimeException());
+                                return;
+                            }
                             o.onNext(containerd.services.tasks.v1.WaitResponse.newBuilder()
                                     .setExitStatus(0).build());
                             o.onCompleted();
@@ -272,6 +291,14 @@ class ContainerNetworkLifecycleTest {
                         @Override
                         public void delete(containerd.services.tasks.v1.DeleteTaskRequest request,
                                            StreamObserver<containerd.services.tasks.v1.DeleteResponse> o) {
+                            if (stored == null) {
+                                o.onError(Status.NOT_FOUND.withDescription("container metadata missing").asRuntimeException());
+                                return;
+                            }
+                            if (failTaskDelete) {
+                                o.onError(Status.INTERNAL.withDescription("task deletion failed").asRuntimeException());
+                                return;
+                            }
                             taskExists = false;
                             events.add("task-delete");
                             o.onNext(containerd.services.tasks.v1.DeleteResponse.getDefaultInstance());
@@ -741,6 +768,68 @@ class ContainerNetworkLifecycleTest {
                     .hasMessageContaining("start failed");
             assertThat(fake.taskExists).isFalse();
             assertThat(fake.events).containsSubsequence("task-create", "task-start", "kill:9", "task-delete");
+        }
+    }
+
+    @Test
+    void removalReapsStoppedTaskEvenWhenBothWaitCallsTimeOut() throws Exception {
+        try (var fake = new FakeContainerd()) {
+            var containers = service(fake, new RecordingNetwork(fake.events));
+            containers.create(networked());
+            containers.start("net-1");
+            fake.deadlineOnWait = true;
+            containers.remove("net-1", RemoveOptions.builder().force(true).removeSnapshot(true).build());
+            assertThat(fake.events).containsSubsequence("kill:15", "kill:9", "task-delete");
+            assertThat(fake.taskExists).isFalse();
+            assertThat(fake.stored).isNull();
+            assertThat(fake.snapshotExists).isFalse();
+            assertThat(containers.pendingRemovals()).isEmpty();
+        }
+    }
+
+    @Test
+    void failedTaskDeletionPreservesMetadataAndSnapshotForRetryAfterRestart() throws Exception {
+        try (var fake = new FakeContainerd()) {
+            var net = new RecordingNetwork(fake.events);
+            var containers = service(fake, net);
+            containers.create(networked());
+            containers.start("net-1");
+            fake.deadlineOnWait = true;
+            fake.failTaskDelete = true;
+            var remove = RemoveOptions.builder().force(true).removeSnapshot(true).build();
+            assertThatThrownBy(() -> containers.remove("net-1", remove)).isInstanceOf(ContainerdException.class);
+            assertThat(fake.events).contains("detach:mynet:" + PID);
+            assertThat(fake.taskStatus).isEqualTo(containerd.v1.types.Status.STOPPED);
+            assertThat(fake.taskExists).isTrue();
+            assertThat(fake.stored).isNotNull();
+            assertThat(fake.snapshotExists).isTrue();
+            var restarted = service(fake, net);
+            assertThat(restarted.pendingRemovals()).extracting(io.nanofaas.containerd.Container::id).containsExactly("net-1");
+            fake.failTaskDelete = false;
+            restarted.remove("net-1", remove);
+            assertThat(fake.taskExists).isFalse();
+            assertThat(fake.stored).isNull();
+            assertThat(fake.snapshotExists).isFalse();
+            assertThat(restarted.pendingRemovals()).isEmpty();
+        }
+    }
+
+    @Test
+    void missingMetadataDoesNotHideAnOrphanTaskOrClearItsJournal() throws Exception {
+        try (var fake = new FakeContainerd()) {
+            var containers = service(fake, new RecordingNetwork(fake.events));
+            containers.create(networked());
+            containers.start("net-1");
+            fake.stored = null;
+            fake.taskStatus = containerd.v1.types.Status.STOPPED;
+            assertThatThrownBy(() -> containers.remove("net-1",
+                    RemoveOptions.builder().force(true).removeSnapshot(true).build()))
+                    .isInstanceOf(ContainerdException.class);
+            assertThat(fake.taskExists).isTrue();
+            assertThat(fake.snapshotExists).isTrue();
+            assertThat(containers.pendingRemovals()).extracting(io.nanofaas.containerd.Container::id).containsExactly("net-1");
+            assertThat(new TasksServiceImpl(fake.channel).list()).extracting(io.nanofaas.containerd.TaskInfo::containerId)
+                    .containsExactly("net-1");
         }
     }
 }

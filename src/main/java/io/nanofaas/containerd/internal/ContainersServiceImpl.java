@@ -397,9 +397,14 @@ public final class ContainersServiceImpl implements Containers {
     public void remove(String id, RemoveOptions options) {
         ProtoMapper.requireValidId(id);
         var entry = journal(id);
-        if (entry == null) return;
+        if (entry == null) {
+            if (runtimeTask(id) != null) {
+                throw new ContainerdException("task " + id + " still exists without container metadata; cleanup cannot be confirmed");
+            }
+            return;
+        }
         // Without force, prove that removal is safe before accepting a durable cleanup intent.
-        TaskInfo task = options.force() ? null : tasks.find(id).orElse(null);
+        TaskInfo task = options.force() ? null : taskForRemoval(id);
         if (task != null && task.state() != ContainerState.STOPPED) {
             throw new ContainerdException("container " + id + " is still running; stop it first or use RemoveOptions.force(true)");
         }
@@ -409,7 +414,7 @@ public final class ContainersServiceImpl implements Containers {
         ContainerdException failure = null;
         boolean lookupFailed = false;
         if (options.force()) {
-            try { task = tasks.find(id).orElse(null); }
+            try { task = taskForRemoval(id); }
             catch (RuntimeException e) {
                 lookupFailed = true;
                 failure = cleanupFailure(failure, e);
@@ -418,25 +423,52 @@ public final class ContainersServiceImpl implements Containers {
         boolean running = task != null && task.state() != ContainerState.STOPPED;
         try { detachNetwork(id, running ? task.pid() : -1); }
         catch (RuntimeException e) { failure = cleanupFailure(failure, e); }
-        if (task != null || lookupFailed) {
+        boolean taskRemoved = task == null && !lookupFailed;
+        if (!taskRemoved) {
+            RuntimeException terminationFailure = null;
             try {
                 if (running || lookupFailed) terminate(id);
-                deleteTaskQuietly(id);
             } catch (TaskNotFoundException ignored) {
-                // Exited and reaped concurrently.
-            } catch (RuntimeException e) { failure = cleanupFailure(failure, e); }
+                // Get/Kill also depend on container metadata; Delete/List must still confirm removal.
+            } catch (RuntimeException e) { terminationFailure = e; }
+            // A wait timeout does not prove that the task is still running. Always attempt Delete.
+            try {
+                try { tasks.delete(id); }
+                catch (TaskNotFoundException e) {
+                    if (runtimeTask(id) != null) {
+                        throw new ContainerdException("task " + id
+                                + " still exists in runtime inventory; retain metadata and retry cleanup", e);
+                    }
+                }
+                taskRemoved = true;
+            } catch (RuntimeException e) {
+                failure = cleanupFailure(failure, e);
+                if (terminationFailure != null) failure = cleanupFailure(failure, terminationFailure);
+            }
         }
-        try {
-            stub.delete(containerd.services.containers.v1.DeleteContainerRequest.newBuilder().setId(id).build());
-        } catch (StatusRuntimeException e) {
-            if (e.getStatus().getCode() != io.grpc.Status.Code.NOT_FOUND) failure = cleanupFailure(failure, e);
-        }
-        if (entry.removeSnapshot && !entry.container.getSnapshotKey().isEmpty()) {
-            try { snapshots.remove(entry.container.getSnapshotter(), entry.container.getSnapshotKey()); }
-            catch (RuntimeException e) { failure = cleanupFailure(failure, e); }
+        // Tasks.Get/Delete require container metadata. Removing it before reaping the task makes
+        // a STOPPED runtime task unreachable by those RPCs and destroys the retry path.
+        if (taskRemoved) {
+            try {
+                stub.delete(containerd.services.containers.v1.DeleteContainerRequest.newBuilder().setId(id).build());
+            } catch (StatusRuntimeException e) {
+                if (e.getStatus().getCode() != io.grpc.Status.Code.NOT_FOUND) failure = cleanupFailure(failure, e);
+            }
+            if (entry.removeSnapshot && !entry.container.getSnapshotKey().isEmpty()) {
+                try { snapshots.remove(entry.container.getSnapshotter(), entry.container.getSnapshotKey()); }
+                catch (RuntimeException e) { failure = cleanupFailure(failure, e); }
+            }
         }
         if (failure != null) throw failure;
         removeStateDirectory(id);
+    }
+
+    private TaskInfo taskForRemoval(String id) {
+        return tasks.find(id).orElseGet(() -> runtimeTask(id));
+    }
+
+    private TaskInfo runtimeTask(String id) {
+        return tasks.list().stream().filter(task -> id.equals(task.containerId())).findFirst().orElse(null);
     }
 
     private static ContainerdException cleanupFailure(ContainerdException primary, RuntimeException failure) {
