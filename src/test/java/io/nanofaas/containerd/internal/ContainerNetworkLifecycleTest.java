@@ -82,6 +82,9 @@ class ContainerNetworkLifecycleTest {
         volatile boolean failSnapshotRemove;
         volatile boolean snapshotExists;
         volatile boolean unavailable;
+        volatile boolean failTaskLookup;
+        volatile boolean rejectTaskCreate;
+        volatile boolean failTaskStart;
 
         FakeContainerd() throws Exception {
             String name = InProcessServerBuilder.generateName();
@@ -202,6 +205,16 @@ class ContainerNetworkLifecycleTest {
                         @Override
                         public void create(containerd.services.tasks.v1.CreateTaskRequest request,
                                            StreamObserver<containerd.services.tasks.v1.CreateTaskResponse> o) {
+                            if (rejectTaskCreate) {
+                                taskExists = true; // A task appeared between Get and Create.
+                                taskStatus = containerd.v1.types.Status.PAUSED;
+                                o.onError(Status.ALREADY_EXISTS.withDescription("existing task").asRuntimeException());
+                                return;
+                            }
+                            if (taskExists) {
+                                o.onError(Status.ALREADY_EXISTS.withDescription("existing task").asRuntimeException());
+                                return;
+                            }
                             taskExists = true;
                             events.add("task-create");
                             o.onNext(containerd.services.tasks.v1.CreateTaskResponse.getDefaultInstance());
@@ -212,6 +225,10 @@ class ContainerNetworkLifecycleTest {
                         public void start(containerd.services.tasks.v1.StartRequest request,
                                           StreamObserver<containerd.services.tasks.v1.StartResponse> o) {
                             events.add("task-start");
+                            if (failTaskStart) {
+                                o.onError(Status.INTERNAL.withDescription("start failed").asRuntimeException());
+                                return;
+                            }
                             o.onNext(containerd.services.tasks.v1.StartResponse.newBuilder()
                                     .setPid(PID).build());
                             o.onCompleted();
@@ -220,6 +237,10 @@ class ContainerNetworkLifecycleTest {
                         @Override
                         public void get(containerd.services.tasks.v1.GetRequest request,
                                         StreamObserver<containerd.services.tasks.v1.GetResponse> o) {
+                            if (failTaskLookup) {
+                                o.onError(Status.INTERNAL.withDescription("shim died").asRuntimeException());
+                                return;
+                            }
                             if (!taskExists) {
                                 o.onError(Status.NOT_FOUND.asRuntimeException());
                                 return;
@@ -634,6 +655,92 @@ class ContainerNetworkLifecycleTest {
                     .hasMessageContaining("pending cleanup");
             assertThatThrownBy(() -> containers.start("net-1")).isInstanceOf(ContainerdException.class)
                     .hasMessageContaining("pending cleanup");
+        }
+    }
+
+    @Test
+    void forcedRemovalPersistsIntentAndCleansIndependentResourcesWhenTaskLookupFails() throws Exception {
+        try (var fake = new FakeContainerd()) {
+            var net = new RecordingNetwork(fake.events);
+            var containers = service(fake, net);
+            containers.create(networked());
+            containers.start("net-1");
+            fake.failTaskLookup = true;
+            assertThatThrownBy(() -> containers.remove("net-1",
+                    RemoveOptions.builder().force(true).removeSnapshot(true).build()))
+                    .isInstanceOf(ContainerdException.class).hasMessageContaining("shim died");
+            var restarted = service(fake, net);
+            assertThat(restarted.pendingRemovals()).extracting(io.nanofaas.containerd.Container::id)
+                    .containsExactly("net-1");
+            assertThat(restarted.pendingRemovals().getFirst().labels())
+                    .containsEntry(ContainersServiceImpl.NETWORK_LABEL, "mynet");
+            assertThat(fake.events).contains("detach:mynet:-1");
+            assertThat(fake.taskExists).isFalse();
+            assertThat(fake.stored).isNull();
+            assertThat(fake.snapshotExists).isFalse();
+            fake.failTaskLookup = false;
+            restarted.remove("net-1", RemoveOptions.builder().build());
+            assertThat(restarted.pendingRemovals()).isEmpty();
+        }
+    }
+
+    @Test
+    void nonForcedRemovalLeavesResourcesIntactWhenTaskLookupFails() throws Exception {
+        try (var fake = new FakeContainerd()) {
+            var containers = service(fake, new RecordingNetwork(fake.events));
+            containers.create(networked());
+            containers.start("net-1");
+            fake.events.clear();
+            fake.failTaskLookup = true;
+            assertThatThrownBy(() -> containers.remove("net-1", RemoveOptions.builder().removeSnapshot(true).build()))
+                    .isInstanceOf(ContainerdException.class).hasMessageContaining("shim died");
+            assertThat(fake.events).isEmpty();
+            assertThat(fake.taskExists).isTrue();
+            assertThat(fake.stored).isNotNull();
+            assertThat(fake.snapshotExists).isTrue();
+            assertThat(containers.pendingRemovals()).isEmpty();
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = containerd.v1.types.Status.class,
+            names = {"PAUSED", "CREATED"})
+    void startDoesNotDestroyAnExistingTask(containerd.v1.types.Status status) throws Exception {
+        try (var fake = new FakeContainerd()) {
+            var containers = service(fake, new RecordingNetwork(fake.events));
+            containers.create(networked());
+            fake.taskExists = true;
+            fake.taskStatus = status;
+            assertThatThrownBy(() -> containers.start("net-1")).isInstanceOf(ContainerStartException.class);
+            assertThat(fake.taskExists).isTrue();
+            assertThat(fake.taskStatus).isEqualTo(status);
+            assertThat(fake.events).isEmpty();
+        }
+    }
+
+    @Test
+    void rejectedTaskCreateDoesNotRollBackTheTaskOwnedByAnotherCaller() throws Exception {
+        try (var fake = new FakeContainerd()) {
+            var containers = service(fake, new RecordingNetwork(fake.events));
+            containers.create(networked());
+            fake.rejectTaskCreate = true;
+            assertThatThrownBy(() -> containers.start("net-1")).isInstanceOf(ContainerdException.class);
+            assertThat(fake.taskExists).isTrue();
+            assertThat(fake.taskStatus).isEqualTo(containerd.v1.types.Status.PAUSED);
+            assertThat(fake.events).isEmpty();
+        }
+    }
+
+    @Test
+    void failedStartRollsBackTheTaskCreatedByThisCall() throws Exception {
+        try (var fake = new FakeContainerd()) {
+            var containers = service(fake, new RecordingNetwork(fake.events));
+            containers.create(networked());
+            fake.failTaskStart = true;
+            assertThatThrownBy(() -> containers.start("net-1")).isInstanceOf(ContainerdException.class)
+                    .hasMessageContaining("start failed");
+            assertThat(fake.taskExists).isFalse();
+            assertThat(fake.events).containsSubsequence("task-create", "task-start", "kill:9", "task-delete");
         }
     }
 }

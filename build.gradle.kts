@@ -114,6 +114,10 @@ tasks.withType<JavaCompile>().configureEach {
     options.release.set(javaRelease)
 }
 
+tasks.withType<Test>().configureEach {
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+
 tasks.test {
     useJUnitPlatform()
     finalizedBy(tasks.jacocoTestReport)

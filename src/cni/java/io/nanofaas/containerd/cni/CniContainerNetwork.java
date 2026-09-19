@@ -58,6 +58,7 @@ public final class CniContainerNetwork implements ContainerNetwork {
                 new DefaultExec(b.pluginTimeout.toMillis()));
     }
 
+    /** {@return a builder using the default CNI paths and interface name} */
     public static Builder builder() {
         return new Builder();
     }

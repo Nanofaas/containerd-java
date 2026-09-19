@@ -398,20 +398,29 @@ public final class ContainersServiceImpl implements Containers {
         ProtoMapper.requireValidId(id);
         var entry = journal(id);
         if (entry == null) return;
-        var task = tasks.find(id).orElse(null);
-        boolean running = task != null && task.state() != ContainerState.STOPPED;
-        if (running && !options.force()) {
+        // Without force, prove that removal is safe before accepting a durable cleanup intent.
+        TaskInfo task = options.force() ? null : tasks.find(id).orElse(null);
+        if (task != null && task.state() != ContainerState.STOPPED) {
             throw new ContainerdException("container " + id + " is still running; stop it first or use RemoveOptions.force(true)");
         }
         entry.pending = true;
         entry.removeSnapshot |= options.removeSnapshot();
         entry.save(stateDirectory);
         ContainerdException failure = null;
+        boolean lookupFailed = false;
+        if (options.force()) {
+            try { task = tasks.find(id).orElse(null); }
+            catch (RuntimeException e) {
+                lookupFailed = true;
+                failure = cleanupFailure(failure, e);
+            }
+        }
+        boolean running = task != null && task.state() != ContainerState.STOPPED;
         try { detachNetwork(id, running ? task.pid() : -1); }
         catch (RuntimeException e) { failure = cleanupFailure(failure, e); }
-        if (task != null) {
+        if (task != null || lookupFailed) {
             try {
-                if (running) terminate(id);
+                if (running || lookupFailed) terminate(id);
                 deleteTaskQuietly(id);
             } catch (TaskNotFoundException ignored) {
                 // Exited and reaped concurrently.
@@ -461,21 +470,24 @@ public final class ContainersServiceImpl implements Containers {
     public int start(String id) {
         refusePendingCleanup(id);
         TaskInfo existing = tasks.find(id).orElse(null);
-        if (existing != null && (existing.state() == ContainerState.RUNNING || existing.state() == ContainerState.STARTING)) {
-            throw new ContainerStartException("task for container " + id + " is already running", null);
+        if (existing != null && existing.state() != ContainerState.STOPPED) {
+            throw new ContainerStartException("task for container " + id + " already exists in state "
+                    + existing.state(), null);
         }
         if (existing != null && existing.state() == ContainerState.STOPPED) {
             log.debug("task for container {} is stopped; deleting before restart", id);
             tasks.delete(id);
         }
+        boolean taskCreated = false;
         try {
             tasks.create(id);
+            taskCreated = true;
             int pid = tasks.start(id);
             attachNetwork(id, pid);
             return pid;
         } catch (RuntimeException e) {
             try {
-                if (tasks.exists(id)) {
+                if (taskCreated && tasks.exists(id)) {
                     tasks.kill(id, Signal.KILL);
                     tasks.wait(id, stopTimeout);
                     tasks.delete(id);
