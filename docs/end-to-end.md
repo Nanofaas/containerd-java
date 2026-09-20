@@ -7,7 +7,7 @@ crun rather than runc. None of them can be exercised on a host already set up th
 likes it, because a pass there might come from the host rather than from the library.
 
 `e2e/containerd_java_e2e.py` covers them by creating the machine it needs, running against it, and
-destroying it. It is a [sonata-engine](https://github.com/miciav/sonata) workflow.
+destroying it. It is a [sonata-engine](https://github.com/Nanofaas/sonata) workflow.
 
 ## What it does
 

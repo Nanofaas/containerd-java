@@ -1,6 +1,6 @@
 # containerd-java
 
-[![build](https://github.com/miciav/containerd-java/actions/workflows/build.yml/badge.svg)](https://github.com/miciav/containerd-java/actions/workflows/build.yml)
+[![build](https://github.com/Nanofaas/containerd-java/actions/workflows/build.yml/badge.svg)](https://github.com/Nanofaas/containerd-java/actions/workflows/build.yml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 A Java client library that talks **directly to containerd's native gRPC API** over a Unix
@@ -236,7 +236,7 @@ attachment into RootlessKit's network namespace, and a runtime that is crun rath
 `e2e/containerd_java_e2e.py` covers them by creating the machine it needs, on a machine that has
 nothing on it yet.
 
-It is a [sonata-engine](https://github.com/miciav/sonata) workflow with five tasks around one
+It is a [sonata-engine](https://github.com/Nanofaas/sonata) workflow with five tasks around one
 resource: build the demo from the working tree, acquire a Multipass VM, install containerd and
 crun to run rootless in it, define a CNI network that declares DNS, deploy the demo, run it, and
 release the VM. The VM is a `Resource`, so it is torn down on the failure path too — the case
@@ -393,7 +393,7 @@ client.containers().stop("fn-1");    // detached here, while it still does
 ```
 
 It is a separate artifact on purpose: it pulls
-[libcni-java](https://github.com/miciav/libcni-java) and, through it, Gson, and the core has no
+[libcni-java](https://github.com/Nanofaas/libcni-java) and, through it, Gson, and the core has no
 JSON dependency by design. Consumers who do not want CNI never see either.
 
 libcni-java is published to GitHub Packages, which requires a token to read even a public package,
@@ -402,7 +402,7 @@ unlike Maven Central:
 ```kotlin
 repositories {
     maven {
-        url = uri("https://maven.pkg.github.com/miciav/libcni-java")
+        url = uri("https://maven.pkg.github.com/Nanofaas/libcni-java")
         credentials {
             username = System.getenv("GITHUB_ACTOR")
             password = System.getenv("GITHUB_TOKEN")   // needs read:packages

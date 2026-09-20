@@ -29,7 +29,7 @@ jobs:
       - name: Check out the companion libcni-java snapshot
         uses: actions/checkout@v7
         with:
-          repository: miciav/libcni-java
+          repository: Nanofaas/libcni-java
           ref: b0d0484970fba0f1d38e1983be67a6bb0e73e3cd
           path: libcni-java
 
@@ -73,7 +73,7 @@ jobs:
       - name: Check out the companion libcni-java snapshot
         uses: actions/checkout@v7
         with:
-          repository: miciav/libcni-java
+          repository: Nanofaas/libcni-java
           ref: b0d0484970fba0f1d38e1983be67a6bb0e73e3cd
           path: libcni-java
 
