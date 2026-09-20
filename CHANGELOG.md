@@ -4,7 +4,7 @@ All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the major version is 0, minor
 versions may carry breaking changes.
 
-## [0.4.0-SNAPSHOT]
+## [0.22.0]
 
 - Persist network attachments and cleanup ownership atomically; expose `networkAttachment` and
   `pendingRemovals`, including identities whose daemon metadata has already been deleted.

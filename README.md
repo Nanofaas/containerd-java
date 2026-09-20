@@ -519,10 +519,10 @@ verbatim from containerd v2.2.1 and remain copyright The containerd Authors, und
 licence. See [NOTICE](NOTICE).
 
 
-## Recoverable lifecycle (0.4.0-SNAPSHOT)
+## Recoverable lifecycle (0.22.0)
 
-Published Maven coordinates are `io.nanofaas:containerd-java:0.4.0-SNAPSHOT` (core) and
-`io.nanofaas:containerd-java-cni:0.4.0-SNAPSHOT` (core plus `io.libcni:libcni-java:0.1.1-SNAPSHOT`
+Published Maven coordinates are `io.nanofaas:containerd-java:0.22.0` (core) and
+`io.nanofaas:containerd-java-cni:0.22.0` (core plus `io.libcni:libcni-java:0.22.0`
 transitively). Both include source/Javadoc artifacts; native reachability metadata ships in core
 and in the transitive libcni artifact. No remote repository is configured for publication here.
 
@@ -536,7 +536,7 @@ For a local source build with the sibling libcni checkout:
 Consumers need only the CNI coordinate when networking is required:
 
 ```groovy
-dependencies { implementation 'io.nanofaas:containerd-java-cni:0.4.0-SNAPSHOT' }
+dependencies { implementation 'io.nanofaas:containerd-java-cni:0.22.0' }
 ```
 
 Choose a persistent `ContainerdClient.builder().stateDirectory(path)`. The client scopes files as
