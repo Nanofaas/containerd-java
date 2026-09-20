@@ -35,7 +35,7 @@ repositories {
     // CNI configurations only, so nobody building the core has to have one.
     maven {
         name = "GitHubPackages"
-        url = uri("https://maven.pkg.github.com/miciav/libcni-java")
+        url = uri("https://maven.pkg.github.com/Nanofaas/libcni-java")
         credentials {
             username = System.getenv("GITHUB_ACTOR") ?: providers.gradleProperty("gpr.user").orNull
             password = System.getenv("GITHUB_TOKEN") ?: providers.gradleProperty("gpr.token").orNull
@@ -202,15 +202,15 @@ publishing {
             pom {
                 name.set(artifactId)
                 description.set("Java containerd client with recoverable container lifecycle and optional CNI networking")
-                url.set("https://github.com/miciav/containerd-java")
+                url.set("https://github.com/Nanofaas/containerd-java")
                 licenses { license {
                     name.set("The Apache License, Version 2.0")
                     url.set("https://www.apache.org/licenses/LICENSE-2.0.txt")
                 } }
                 scm {
-                    connection.set("scm:git:https://github.com/miciav/containerd-java.git")
-                    developerConnection.set("scm:git:ssh://git@github.com/miciav/containerd-java.git")
-                    url.set("https://github.com/miciav/containerd-java")
+                    connection.set("scm:git:https://github.com/Nanofaas/containerd-java.git")
+                    developerConnection.set("scm:git:ssh://git@github.com/Nanofaas/containerd-java.git")
+                    url.set("https://github.com/Nanofaas/containerd-java")
                 }
                 developers { developer { id.set("miciav"); name.set("Michele") } }
             }
