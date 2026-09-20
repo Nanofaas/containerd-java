@@ -524,7 +524,10 @@ licence. See [NOTICE](NOTICE).
 Published Maven coordinates are `io.nanofaas:containerd-java:0.22.0` (core) and
 `io.nanofaas:containerd-java-cni:0.22.0` (core plus `io.libcni:libcni-java:0.22.0`
 transitively). Both include source/Javadoc artifacts; native reachability metadata ships in core
-and in the transitive libcni artifact. No remote repository is configured for publication here.
+and in the transitive libcni artifact. Publication goes to GitHub Packages at
+`https://maven.pkg.github.com/Nanofaas/containerd-java`, from a `v*` tag whose number has to
+match the version in `build.gradle.kts`. A push never publishes: a version cannot be
+published twice, so publishing from a branch would fail on the second commit.
 
 For a local source build with the sibling libcni checkout:
 
