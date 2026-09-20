@@ -14,7 +14,7 @@ plugins {
 }
 
 group = "io.nanofaas"
-version = "0.4.0-SNAPSHOT"
+version = "0.22.0"
 
 val containerdApiVersion = "v2.2.1" // pinned containerd API; bump together with vendored protos
 val grpcVersion = "1.73.0"
@@ -146,7 +146,7 @@ cni.compileClasspath += sourceSets.main.get().output
 cni.runtimeClasspath += sourceSets.main.get().output
 
 dependencies {
-    "cniImplementation"("io.libcni:libcni-java:0.1.1-SNAPSHOT")
+    "cniImplementation"("io.libcni:libcni-java:0.22.0")
     "cniImplementation"("org.slf4j:slf4j-api:$slf4jVersion")
 }
 
@@ -174,6 +174,18 @@ val cniJavadocJar = tasks.register<Jar>("cniJavadocJar") {
     from(cniJavadoc)
 }
 publishing {
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/Nanofaas/containerd-java")
+            // Credentials come from the environment so nothing is committed. In Actions these are
+            // the workflow's own GITHUB_TOKEN; locally, a personal token with write:packages.
+            credentials {
+                username = System.getenv("GITHUB_ACTOR") ?: providers.gradleProperty("gpr.user").orNull
+                password = System.getenv("GITHUB_TOKEN") ?: providers.gradleProperty("gpr.token").orNull
+            }
+        }
+    }
     publications {
         create<MavenPublication>("core") {
             from(components["java"])
@@ -187,7 +199,7 @@ publishing {
                 val dependencies = asNode().appendNode("dependencies")
                 for ((group, artifact, version) in listOf(
                     Triple("io.nanofaas", "containerd-java", project.version.toString()),
-                    Triple("io.libcni", "libcni-java", "0.1.1-SNAPSHOT")
+                    Triple("io.libcni", "libcni-java", "0.22.0")
                 )) {
                     dependencies.appendNode("dependency").apply {
                         appendNode("groupId", group)
