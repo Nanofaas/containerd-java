@@ -174,6 +174,18 @@ val cniJavadocJar = tasks.register<Jar>("cniJavadocJar") {
     from(cniJavadoc)
 }
 publishing {
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/Nanofaas/containerd-java")
+            // Credentials come from the environment so nothing is committed. In Actions these are
+            // the workflow's own GITHUB_TOKEN; locally, a personal token with write:packages.
+            credentials {
+                username = System.getenv("GITHUB_ACTOR") ?: providers.gradleProperty("gpr.user").orNull
+                password = System.getenv("GITHUB_TOKEN") ?: providers.gradleProperty("gpr.token").orNull
+            }
+        }
+    }
     publications {
         create<MavenPublication>("core") {
             from(components["java"])

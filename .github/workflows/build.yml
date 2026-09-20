@@ -3,6 +3,10 @@ name: build
 on:
   push:
     branches: [master]
+    # A release version is published from a tag, never from a push: GitHub Packages
+    # will not accept the same version twice, so a push-triggered publish would fail
+    # on the second commit. Pushes to master still build and test.
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -265,3 +269,65 @@ jobs:
           name: integration-test-report
           path: containerd-java/build/reports/tests/integrationTest
           retention-days: 7
+
+  publish:
+    name: publish to GitHub Packages
+    # Only once both jobs agree the library works, and only for a tag: a package is not
+    # something to take back. The `cni` publication resolves libcni-java from the
+    # companion build, so the same pinned revision the tests validated is what ships.
+    needs: [unit, integration]
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # Write rather than read, and only here: the workflow-level grant stays read.
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: containerd-java
+
+      - name: Check out the companion libcni-java snapshot
+        uses: actions/checkout@v7
+        with:
+          repository: Nanofaas/libcni-java
+          ref: b0d0484970fba0f1d38e1983be67a6bb0e73e3cd
+          path: libcni-java
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          build-root-directory: containerd-java
+
+      - name: Install the companion libcni-java snapshot
+        working-directory: libcni-java
+        run: ./gradlew publishToMavenLocal --stacktrace
+
+      # Before the upload, not after: publishing 0.22.0 under the tag v0.21.0 would
+      # spend a version number on the wrong build, and a version is not reusable.
+      - name: Check the tag matches the version in the build
+        working-directory: containerd-java
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(grep -oP '^version = "\K[^"]+' build.gradle.kts)"
+          if [ -z "$version" ]; then
+            echo "could not read the version from build.gradle.kts" >&2
+            exit 1
+          fi
+          if [ "$tag" != "$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match version $version in build.gradle.kts" >&2
+            exit 1
+          fi
+          echo "tag $GITHUB_REF_NAME matches version $version"
+
+      - name: Publish
+        working-directory: containerd-java
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./gradlew publishAllPublicationsToGitHubPackagesRepository --stacktrace
