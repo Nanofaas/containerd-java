@@ -86,13 +86,13 @@ class ExecPathTest {
                                 @Override
                                 public void start(containerd.services.tasks.v1.StartRequest request,
                                                   StreamObserver<containerd.services.tasks.v1.StartResponse> o) {
-                                    shimThreads.submit(this::runProcess);
+                                    shimThreads.execute(this::runProcess);
                                     o.onNext(containerd.services.tasks.v1.StartResponse.newBuilder()
                                             .setPid(4321).build());
                                     o.onCompleted();
                                 }
 
-                                /** What the shim does: consume stdin, emit output, exit. */
+                                // What the shim does: consume stdin, emit output, exit.
                                 private void runProcess() {
                                     try {
                                         // Blocks until the client opens the write end. If the

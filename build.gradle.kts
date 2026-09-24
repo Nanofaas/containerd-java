@@ -1,3 +1,6 @@
+import com.github.spotbugs.snom.SpotBugsTask
+import net.ltgt.gradle.errorprone.errorprone
+
 plugins {
     `java-library`
     `maven-publish`
@@ -11,6 +14,9 @@ plugins {
     // Builds the example as a native image, which is how the GraalVM support is kept honest:
     // the metadata this library ships is only correct if a real image built from it runs.
     id("org.graalvm.buildtools.native") version "1.1.12"
+    // Static analysis, set up as in NanoFaaS: both report, neither fails the build.
+    id("com.github.spotbugs") version "6.5.11"
+    id("net.ltgt.errorprone") version "5.1.1"
 }
 
 group = "io.nanofaas"
@@ -27,6 +33,8 @@ val junitPlatformVersion = "1.11.4"
 val assertjVersion = "3.27.3"
 val javaxAnnotationVersion = "1.3.2"
 val libcniVersion = "0.22.0"
+val spotbugsVersion = "4.10.4"
+val errorProneVersion = "2.50.0"
 
 repositories {
     mavenCentral()
@@ -112,6 +120,33 @@ dependencies {
 
 tasks.withType<JavaCompile>().configureEach {
     options.release.set(javaRelease)
+    options.errorprone {
+        allErrorsAsWarnings.set(true)
+        disableWarningsInGeneratedCode.set(true)
+        // The protobuf stubs carry no @Generated that Error Prone recognises; skip them by path.
+        excludedPaths.set(".*/build/generated/.*")
+    }
+}
+
+dependencies {
+    errorprone("com.google.errorprone:error_prone_core:$errorProneVersion")
+}
+
+spotbugs {
+    toolVersion.set(spotbugsVersion)
+    ignoreFailures.set(true)
+    excludeFilter.set(file("config/spotbugs/exclude.xml"))
+}
+
+tasks.withType<SpotBugsTask>().configureEach {
+    // Production code only: the published core and CNI jars, plus the e2e and sonar tools.
+    enabled = name != "spotbugsTest" && name != "spotbugsIntegrationTest"
+    reports.create("html") { required.set(true) }
+    reports.create("xml") { required.set(true) }
+}
+
+jacoco {
+    toolVersion = "0.8.14"
 }
 
 tasks.withType<Test>().configureEach {
@@ -131,12 +166,27 @@ tasks.jacocoTestReport {
         xml.required.set(true)   // what SonarQube reads
         html.required.set(true)  // what a human reads
     }
-    classDirectories.setFrom(files(classDirectories.files.map {
-        // The generated protobuf and gRPC stubs are not this project's code to cover.
-        fileTree(it) { exclude("containerd/**", "runtimeoptions/**") }
-    }))
 }
 
+// The generated protobuf and gRPC stubs are not this project's code to cover.
+listOf(tasks.jacocoTestReport, tasks.jacocoTestCoverageVerification).forEach { task ->
+    task.configure {
+        classDirectories.setFrom(files(classDirectories.files.map {
+            fileTree(it) { exclude("containerd/**", "runtimeoptions/**") }
+        }))
+    }
+}
+
+// As in NanoFaaS: run on demand (./gradlew jacocoTestCoverageVerification), not part of check.
+tasks.jacocoTestCoverageVerification {
+    violationRules {
+        rule {
+            limit {
+                minimum = "0.85".toBigDecimal()
+            }
+        }
+    }
+}
 
 // ---- CNI networking (optional, published separately) ----
 // A source set rather than part of main: it pulls libcni-java and, through it, Gson, and this

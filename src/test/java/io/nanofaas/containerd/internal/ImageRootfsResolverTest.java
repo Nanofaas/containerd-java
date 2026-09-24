@@ -61,7 +61,7 @@ class ImageRootfsResolverTest {
                     public void info(containerd.services.content.v1.InfoRequest request,
                                      StreamObserver<containerd.services.content.v1.InfoResponse> responseObserver) {
                         byte[] data = request.getDigest().equals("sha256:config-digest")
-                                ? CONFIG_JSON.getBytes() : MANIFEST_JSON.getBytes();
+                                ? CONFIG_JSON.getBytes(java.nio.charset.StandardCharsets.UTF_8) : MANIFEST_JSON.getBytes(java.nio.charset.StandardCharsets.UTF_8);
                         responseObserver.onNext(containerd.services.content.v1.InfoResponse.newBuilder()
                                 .setInfo(containerd.services.content.v1.Info.newBuilder()
                                         .setDigest(request.getDigest())
@@ -74,7 +74,7 @@ class ImageRootfsResolverTest {
                     public void read(containerd.services.content.v1.ReadContentRequest request,
                                      StreamObserver<containerd.services.content.v1.ReadContentResponse> responseObserver) {
                         byte[] data = request.getDigest().equals("sha256:config-digest")
-                                ? CONFIG_JSON.getBytes() : MANIFEST_JSON.getBytes();
+                                ? CONFIG_JSON.getBytes(java.nio.charset.StandardCharsets.UTF_8) : MANIFEST_JSON.getBytes(java.nio.charset.StandardCharsets.UTF_8);
                         responseObserver.onNext(containerd.services.content.v1.ReadContentResponse.newBuilder()
                                 .setOffset(0)
                                 .setData(com.google.protobuf.ByteString.copyFrom(data))

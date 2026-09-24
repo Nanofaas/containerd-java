@@ -326,7 +326,8 @@ public final class OciSpecBuilder {
     }
 
     private static Value numberValue(long n) {
-        return Value.newBuilder().setNumberValue(n).build();
+        // Exact up to 2^53, far beyond any limit or id in a spec; JsonSupport prints it back as an integer.
+        return Value.newBuilder().setNumberValue((double) n).build();
     }
 
     private static Value boolValue(boolean b) {

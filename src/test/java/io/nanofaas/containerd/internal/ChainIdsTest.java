@@ -12,7 +12,7 @@ class ChainIdsTest {
 
     private static String sha256(String s) {
         try {
-            return "sha256:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(s.getBytes()));
+            return "sha256:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(s.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         } catch (Exception e) {
             throw new AssertionError(e);
         }

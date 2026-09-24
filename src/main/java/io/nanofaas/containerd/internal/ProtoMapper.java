@@ -3,7 +3,6 @@ package io.nanofaas.containerd.internal;
 import io.nanofaas.containerd.*;
 
 import java.time.Instant;
-import java.util.Map;
 
 /** Conversions between containerd protobuf messages and the public model. */
 public final class ProtoMapper {
@@ -18,7 +17,7 @@ public final class ProtoMapper {
                 c.getSnapshotter(),
                 c.getSnapshotKey(),
                 c.hasCreatedAt() ? Instant.ofEpochSecond(c.getCreatedAt().getSeconds(), c.getCreatedAt().getNanos()) : Instant.EPOCH,
-                Map.copyOf(c.getLabelsMap()));
+                c.getLabelsMap());
     }
 
     public static Image map(containerd.services.images.v1.Image i) {
@@ -27,7 +26,7 @@ public final class ProtoMapper {
                 i.getTarget().getDigest(),
                 i.getTarget().getSize(),
                 i.hasCreatedAt() ? Instant.ofEpochSecond(i.getCreatedAt().getSeconds(), i.getCreatedAt().getNanos()) : Instant.EPOCH,
-                Map.copyOf(i.getLabelsMap()));
+                i.getLabelsMap());
     }
 
     /**

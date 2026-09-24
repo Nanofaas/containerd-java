@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!-- Generated from the vendored containerd protos: not this project's code to fix. -->
+    <Match>
+        <Class name="~(containerd|runtimeoptions)\..*"/>
+    </Match>
+
+    <!-- The client hands out its own service facades on purpose: sharing them is the API. -->
+    <Match>
+        <Class name="io.nanofaas.containerd.internal.DefaultContainerdClient"/>
+        <Bug pattern="EI_EXPOSE_REP"/>
+    </Match>
+
+    <!-- /opt/cni/bin, /etc/cni/net.d and /var/lib/cni are the CNI conventions, overridable on the builder. -->
+    <Match>
+        <Class name="~io\.nanofaas\.containerd\.cni\.CniContainerNetwork(\$Builder)?"/>
+        <Bug pattern="DMI_HARDCODED_ABSOLUTE_FILENAME"/>
+    </Match>
+</FindBugsFilter>

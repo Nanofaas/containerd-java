@@ -235,7 +235,7 @@ public final class ContainersServiceImpl implements Containers {
         }
         Path resolvConf = resolvConfPath(spec.id());
         try {
-            Files.createDirectories(resolvConf.getParent());
+            Files.createDirectories(stateDirectory.resolve(spec.id()));
             Files.writeString(resolvConf, "");
             resolvConf.toFile().setReadable(true, false);
         } catch (IOException e) {
@@ -318,7 +318,7 @@ public final class ContainersServiceImpl implements Containers {
             return;
         }
         try (var entries = Files.list(dir)) {
-            for (var entry : entries.filter(path -> !path.getFileName().toString().equals("lifecycle.properties")).toList()) {
+            for (var entry : entries.filter(path -> !path.endsWith("lifecycle.properties")).toList()) {
                 Files.deleteIfExists(entry);
             }
             Files.deleteIfExists(dir.resolve("lifecycle.properties"));

@@ -34,8 +34,12 @@ final class ContainerJournal {
         Properties values = new Properties();
         try (var in = Files.newInputStream(path)) {
             values.load(in);
+            String encoded = values.getProperty("container");
+            if (encoded == null) {
+                throw new IOException("journal has no container record");
+            }
             var entry = new ContainerJournal(containerd.services.containers.v1.Container.parseFrom(
-                    Base64.getDecoder().decode(values.getProperty("container"))));
+                    Base64.getDecoder().decode(encoded)));
             if (!entry.container.getId().equals(id)) {
                 throw new IOException("container identity does not match journal directory");
             }
@@ -49,7 +53,7 @@ final class ContainerJournal {
             return entry;
         } catch (NoSuchFileException e) {
             return null;
-        } catch (IOException | IllegalArgumentException | NullPointerException e) {
+        } catch (IOException | IllegalArgumentException e) {
             throw new ContainerdException("could not read lifecycle state " + path + "; check stateDirectory", e);
         }
     }
@@ -91,7 +95,7 @@ final class ContainerJournal {
     static List<ContainerJournal> list(Path directory) {
         try (var paths = Files.list(directory)) {
             return paths.filter(Files::isDirectory)
-                    .map(path -> read(directory, path.getFileName().toString()))
+                    .map(path -> read(directory, directory.relativize(path).toString()))
                     .filter(java.util.Objects::nonNull).toList();
         } catch (NoSuchFileException e) {
             return List.of();

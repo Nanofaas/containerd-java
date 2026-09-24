@@ -53,6 +53,9 @@ public final class GrpcChannelFactory {
      * callback immediately when the state has already moved past the observed source, so no
      * transition can be missed.
      */
+    // shutdownGracefully() is not awaited: the quiet period runs on the group's own threads, off
+    // the caller's path.
+    @SuppressWarnings("FutureReturnValueIgnored")
     private static void releaseEventLoopGroupOnTermination(ManagedChannel channel,
                                                            EpollEventLoopGroup eventLoopGroup) {
         ConnectivityState state = channel.getState(false);

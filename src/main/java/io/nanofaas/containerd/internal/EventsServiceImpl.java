@@ -149,7 +149,7 @@ public final class EventsServiceImpl implements Events {
                     }
                     Event event = EventMapper.map(envelope);
                     try {
-                        handlerExecutor.submit(() -> {
+                        handlerExecutor.execute(() -> {
                             try {
                                 handler.accept(event);
                             } catch (Exception e) {
@@ -174,6 +174,9 @@ public final class EventsServiceImpl implements Events {
             });
         }
 
+        // Nothing to read from the reconnect's future: connect() reports failures through the
+        // stream observer, which lands back here and schedules the next attempt itself.
+        @SuppressWarnings("FutureReturnValueIgnored")
         private void handleStreamEnd(Throwable error) {
             if (stopped()) {
                 return;

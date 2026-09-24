@@ -66,7 +66,7 @@ class ContainersServiceImplTest {
                         public void info(containerd.services.content.v1.InfoRequest request,
                                          StreamObserver<containerd.services.content.v1.InfoResponse> responseObserver) {
                             byte[] data = request.getDigest().equals("sha256:config")
-                                    ? SCRATCH_CONFIG.getBytes() : SCRATCH_MANIFEST.getBytes();
+                                    ? SCRATCH_CONFIG.getBytes(java.nio.charset.StandardCharsets.UTF_8) : SCRATCH_MANIFEST.getBytes(java.nio.charset.StandardCharsets.UTF_8);
                             responseObserver.onNext(containerd.services.content.v1.InfoResponse.newBuilder()
                                     .setInfo(containerd.services.content.v1.Info.newBuilder()
                                             .setDigest(request.getDigest()).setSize(data.length)).build());
@@ -77,7 +77,7 @@ class ContainersServiceImplTest {
                         public void read(containerd.services.content.v1.ReadContentRequest request,
                                          StreamObserver<containerd.services.content.v1.ReadContentResponse> responseObserver) {
                             byte[] data = request.getDigest().equals("sha256:config")
-                                    ? SCRATCH_CONFIG.getBytes() : SCRATCH_MANIFEST.getBytes();
+                                    ? SCRATCH_CONFIG.getBytes(java.nio.charset.StandardCharsets.UTF_8) : SCRATCH_MANIFEST.getBytes(java.nio.charset.StandardCharsets.UTF_8);
                             responseObserver.onNext(containerd.services.content.v1.ReadContentResponse.newBuilder()
                                     .setOffset(0).setData(com.google.protobuf.ByteString.copyFrom(data)).build());
                             responseObserver.onCompleted();

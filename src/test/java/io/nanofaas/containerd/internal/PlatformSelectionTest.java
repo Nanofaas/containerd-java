@@ -25,7 +25,7 @@ class PlatformSelectionTest {
     private static String index(String... platforms) {
         StringBuilder entries = new StringBuilder();
         for (String platform : platforms) {
-            String[] parts = platform.split("/");
+            String[] parts = platform.split("/", 2);
             if (!entries.isEmpty()) {
                 entries.append(',');
             }

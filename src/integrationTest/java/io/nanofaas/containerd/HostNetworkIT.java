@@ -38,9 +38,9 @@ class HostNetworkIT extends ContainerdConnectionIT {
     /** Answers one connection with PONG, then closes. Returns the port it listens on. */
     private static ServerSocket listenOnce() throws Exception {
         ServerSocket server = new ServerSocket(0);
-        responders.submit(() -> {
+        responders.execute(() -> {
             try (Socket socket = server.accept(); OutputStream out = socket.getOutputStream()) {
-                out.write("PONG\n".getBytes());
+                out.write("PONG\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 out.flush();
             } catch (Exception ignored) {
                 // the test asserts on the container's side
