@@ -25,9 +25,13 @@ class OciSpecBuilderTest {
         }
     }
 
+    private static com.google.protobuf.Any containerSpec(ContainerSpec spec) {
+        return OciSpecBuilder.buildContainerSpec(spec, ImageConfig.EMPTY, List.of());
+    }
+
     @Test
     void containerSpecUsesContainerdTypeUrlAndJsonValue() {
-        var any = OciSpecBuilder.buildContainerSpec(ContainerSpec.builder()
+        var any = containerSpec(ContainerSpec.builder()
                 .id("test-1")
                 .image("docker.io/library/alpine:latest")
                 .command(List.of("/bin/sh", "-c", "while true; do sleep 10; done"))
@@ -40,7 +44,7 @@ class OciSpecBuilderTest {
 
     @Test
     void containerSpecIncludesProcessRootAndLinuxDefaults() {
-        var spec = parse(OciSpecBuilder.buildContainerSpec(ContainerSpec.builder()
+        var spec = parse(containerSpec(ContainerSpec.builder()
                 .id("test-1")
                 .image("alpine")
                 .command(List.of("/bin/sh"))
@@ -80,7 +84,7 @@ class OciSpecBuilderTest {
 
     @Test
     void containerSpecIncludesResourceLimits() {
-        var spec = parse(OciSpecBuilder.buildContainerSpec(ContainerSpec.builder()
+        var spec = parse(containerSpec(ContainerSpec.builder()
                 .id("test-1")
                 .image("alpine")
                 .cpuShares(512)
@@ -109,7 +113,7 @@ class OciSpecBuilderTest {
 
     @Test
     void readonlyRootfsIsPropagated() {
-        var spec = parse(OciSpecBuilder.buildContainerSpec(ContainerSpec.builder()
+        var spec = parse(containerSpec(ContainerSpec.builder()
                 .id("test-1")
                 .image("alpine")
                 .readonlyRootfs(true)
@@ -121,7 +125,7 @@ class OciSpecBuilderTest {
     void printedSpecJsonUsesBareIntegersForNumericFields() {
         // Regression: containerd unmarshals the spec into Go uint64/int64 fields and rejects
         // "1024.0" (protobuf Value doubles printed with a decimal point).
-        var any = OciSpecBuilder.buildContainerSpec(ContainerSpec.builder()
+        var any = containerSpec(ContainerSpec.builder()
                 .id("test-1")
                 .image("alpine")
                 .command(List.of("/bin/sh"))
@@ -141,7 +145,8 @@ class OciSpecBuilderTest {
 
     @Test
     void execSpecUsesProcessTypeUrlAndJson() {
-        var any = OciSpecBuilder.buildExecSpec(List.of("/bin/echo", "hello"), Map.of("A", "B"), "/tmp");
+        var any = OciSpecBuilder.buildExecSpec(List.of("/bin/echo", "hello"), Map.of("A", "B"), "/tmp",
+                List.of(), null, null);
         assertThat(any.getTypeUrl()).isEqualTo(PROCESS_TYPE_URL);
         var process = parse(any);
         assertThat(process.getFieldsOrThrow("args").getListValue().getValuesList())
@@ -155,11 +160,11 @@ class OciSpecBuilderTest {
         // These two used to disagree: exec set noNewPrivileges true while the entrypoint set it
         // false, so "sudo" failed under exec and worked as the entrypoint. Both now match the
         // docker/ctr default of false. Changing that is a security decision, not a cleanup.
-        String containerSpec = OciSpecBuilder.buildContainerSpec(
+        String containerSpec = containerSpec(
                 ContainerSpec.builder().id("c1").image("scratch").build())
                 .getValue().toStringUtf8();
         String execSpec = OciSpecBuilder.buildExecSpec(
-                java.util.List.of("sudo", "whoami"), java.util.Map.of(), null)
+                java.util.List.of("sudo", "whoami"), java.util.Map.of(), null, List.of(), null, null)
                 .getValue().toStringUtf8();
 
         assertThat(containerSpec).contains("\"noNewPrivileges\":false");
@@ -168,7 +173,7 @@ class OciSpecBuilderTest {
 
     @Test
     void containersGetTheirOwnNetworkNamespaceByDefault() {
-        String json = OciSpecBuilder.buildContainerSpec(
+        String json = containerSpec(
                 ContainerSpec.builder().id("c1").image("scratch").build())
                 .getValue().toStringUtf8();
 
@@ -179,7 +184,7 @@ class OciSpecBuilderTest {
     void hostNetworkOmitsTheNetworkNamespaceAndKeepsTheOthers() {
         // The OCI spec has no "use the host's network" switch: a namespace is requested by being
         // listed, so sharing the host's means leaving it out.
-        String json = OciSpecBuilder.buildContainerSpec(
+        String json = containerSpec(
                 ContainerSpec.builder().id("c1").image("scratch").hostNetwork(true).build())
                 .getValue().toStringUtf8();
 
@@ -192,7 +197,7 @@ class OciSpecBuilderTest {
 
     @Test
     void theOpenFileLimitDefaultsToAThousandAndTwentyFour() {
-        String json = OciSpecBuilder.buildContainerSpec(
+        String json = containerSpec(
                 ContainerSpec.builder().id("c1").image("scratch").build())
                 .getValue().toStringUtf8();
 
@@ -204,7 +209,7 @@ class OciSpecBuilderTest {
     void theOpenFileLimitIsConfigurable() {
         // Elasticsearch refuses to start below 65535, and the default of 1024 is what stopped
         // SonarQube from coming up.
-        String json = OciSpecBuilder.buildContainerSpec(
+        String json = containerSpec(
                 ContainerSpec.builder().id("c1").image("scratch").openFilesLimit(65536).build())
                 .getValue().toStringUtf8();
 
@@ -221,7 +226,7 @@ class OciSpecBuilderTest {
 
     @Test
     void rootlessResourceKnobsReachTheOciSpec() {
-        var spec = parse(OciSpecBuilder.buildContainerSpec(ContainerSpec.builder()
+        var spec = parse(containerSpec(ContainerSpec.builder()
                 .id("resources").image("alpine").cpuSetCpus("0-1")
                 .memoryReservationBytes(67108864).memoryLimitBytes(134217728)
                 .cpuShares(512).cpuQuotaMicros(50000).cpuPeriodMicros(100000)

@@ -3,7 +3,6 @@ package io.nanofaas.containerd.internal;
 import io.grpc.ManagedChannel;
 import io.grpc.StatusRuntimeException;
 import io.nanofaas.containerd.*;
-import io.nanofaas.containerd.spi.Tasks;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -11,7 +10,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
-public final class TasksServiceImpl implements Tasks {
+/** Task operations the container lifecycle is built on; a task is the running instance of a container. */
+final class TasksServiceImpl {
 
     private static final Logger log = LoggerFactory.getLogger(TasksServiceImpl.class);
 
@@ -21,15 +21,7 @@ public final class TasksServiceImpl implements Tasks {
     private final String runtimeBinaryName;
     private final boolean systemdCgroup;
 
-    public TasksServiceImpl(ManagedChannel channel) {
-        this(channel, null);
-    }
-
-    public TasksServiceImpl(ManagedChannel channel, String runtimeBinaryName) {
-        this(channel, runtimeBinaryName, false);
-    }
-
-    public TasksServiceImpl(ManagedChannel channel, String runtimeBinaryName, boolean systemdCgroup) {
+    TasksServiceImpl(ManagedChannel channel, String runtimeBinaryName, boolean systemdCgroup) {
         this.systemdCgroup = systemdCgroup;
         this.stub = containerd.services.tasks.v1.TasksGrpc.newBlockingStub(channel);
         this.containers = containerd.services.containers.v1.ContainersGrpc.newBlockingStub(channel);
@@ -37,8 +29,7 @@ public final class TasksServiceImpl implements Tasks {
         this.runtimeBinaryName = runtimeBinaryName;
     }
 
-    @Override
-    public void create(String containerId) {
+    void create(String containerId) {
         containerd.services.containers.v1.Container container;
         try {
             container = containers.get(containerd.services.containers.v1.GetContainerRequest.newBuilder()
@@ -79,8 +70,7 @@ public final class TasksServiceImpl implements Tasks {
         }
     }
 
-    @Override
-    public int start(String containerId) {
+    int start(String containerId) {
         try {
             return stub.start(containerd.services.tasks.v1.StartRequest.newBuilder()
                     .setContainerId(containerId).build()).getPid();
@@ -89,8 +79,7 @@ public final class TasksServiceImpl implements Tasks {
         }
     }
 
-    @Override
-    public void kill(String containerId, Signal signal) {
+    void kill(String containerId, Signal signal) {
         log.debug("task kill: containerId={} signal={}", containerId, signal);
         try {
             stub.kill(containerd.services.tasks.v1.KillRequest.newBuilder()
@@ -103,17 +92,11 @@ public final class TasksServiceImpl implements Tasks {
         }
     }
 
-    @Override
-    public ExitStatus wait(String containerId) {
-        return waitInternal(containerId, null);
-    }
-
-    @Override
-    public ExitStatus wait(String containerId, java.time.Duration timeout) {
-        return waitInternal(containerId, timeout);
-    }
-
-    private ExitStatus waitInternal(String containerId, java.time.Duration timeout) {
+    /**
+     * Blocks until the task exits, or until {@code timeout} elapses when it is not null. A timeout
+     * surfaces as the raw DEADLINE_EXCEEDED status so callers can tell it from a failure.
+     */
+    ExitStatus wait(String containerId, java.time.Duration timeout) {
         try {
             var blockingStub = timeout == null
                     ? stub
@@ -129,8 +112,7 @@ public final class TasksServiceImpl implements Tasks {
         }
     }
 
-    @Override
-    public ExitStatus delete(String containerId) {
+    ExitStatus delete(String containerId) {
         try {
             var response = stub.delete(containerd.services.tasks.v1.DeleteTaskRequest.newBuilder()
                     .setContainerId(containerId).build());
@@ -140,14 +122,7 @@ public final class TasksServiceImpl implements Tasks {
         }
     }
 
-    @Override
-    public TaskInfo inspect(String containerId) {
-        return find(containerId).orElseThrow(() ->
-                new TaskNotFoundException("no task for container " + containerId, null));
-    }
-
-    @Override
-    public List<TaskInfo> list() {
+    List<TaskInfo> list() {
         try {
             return stub.list(containerd.services.tasks.v1.ListTasksRequest.getDefaultInstance())
                     .getTasksList().stream()
@@ -158,14 +133,8 @@ public final class TasksServiceImpl implements Tasks {
         }
     }
 
-    /**
-     * Looks the task up in one round trip, empty if there is none (a STOPPED task still counts).
-     *
-     * <p>This is the primitive callers should use. Asking {@code exists()} and then
-     * {@code inspect()} is two RPCs with a race between them: a task that exits and is reaped in
-     * the gap makes the second call fail on a container the first said was there.
-     */
-    public Optional<TaskInfo> find(String containerId) {
+    /** Looks the task up in one round trip, empty if there is none (a STOPPED task still counts). */
+    Optional<TaskInfo> find(String containerId) {
         try {
             return Optional.of(toTaskInfo(stub.get(containerd.services.tasks.v1.GetRequest.newBuilder()
                     .setContainerId(containerId).build()).getProcess()));
@@ -177,11 +146,6 @@ public final class TasksServiceImpl implements Tasks {
         }
     }
 
-    /** Returns whether a task exists for the container (true even for STOPPED tasks). */
-    public boolean exists(String containerId) {
-        return find(containerId).isPresent();
-    }
-
     private static TaskInfo toTaskInfo(containerd.v1.types.Process process) {
         return new TaskInfo(process.getContainerId().isEmpty() ? process.getId() : process.getContainerId(), process.getPid(),
                 ProtoMapper.mapStatus(process.getStatus()), process.getExitStatus(),
@@ -190,11 +154,6 @@ public final class TasksServiceImpl implements Tasks {
 
     private static Instant instant(com.google.protobuf.Timestamp timestamp) {
         return Instant.ofEpochSecond(timestamp.getSeconds(), timestamp.getNanos());
-    }
-
-    /** Creates an exec process (OCI process spec + IO FIFO paths) inside a running task. */
-    public void exec(String containerId, String execId, ExecSpec spec, IoManager.FifoSet fifos) {
-        exec(containerId, execId, spec, fifos, StoredSpec.EMPTY);
     }
 
     /**
@@ -221,7 +180,7 @@ public final class TasksServiceImpl implements Tasks {
     }
 
     /** Starts an exec process; returns its pid. */
-    public int startExec(String containerId, String execId) {
+    int startExec(String containerId, String execId) {
         try {
             return stub.start(containerd.services.tasks.v1.StartRequest.newBuilder()
                     .setContainerId(containerId).setExecId(execId).build()).getPid();
@@ -231,7 +190,7 @@ public final class TasksServiceImpl implements Tasks {
     }
 
     /** Blocks until an exec process exits; returns its exit status. */
-    public ExitStatus waitExec(String containerId, String execId) {
+    ExitStatus waitExec(String containerId, String execId) {
         try {
             var response = stub.wait(containerd.services.tasks.v1.WaitRequest.newBuilder()
                     .setContainerId(containerId).setExecId(execId).build());
@@ -253,7 +212,7 @@ public final class TasksServiceImpl implements Tasks {
      * @param containerId the container the process runs in
      * @param execId the exec process, or {@code null} for the container's own init process
      */
-    public void closeStdin(String containerId, String execId) {
+    void closeStdin(String containerId, String execId) {
         var request = containerd.services.tasks.v1.CloseIORequest.newBuilder()
                 .setContainerId(containerId)
                 .setStdin(true);
@@ -272,7 +231,7 @@ public final class TasksServiceImpl implements Tasks {
     }
 
     /** Deletes an exec process. Idempotent — a missing exec (NOT_FOUND) is ignored. */
-    public void deleteExec(String containerId, String execId) {
+    void deleteExec(String containerId, String execId) {
         try {
             stub.deleteProcess(containerd.services.tasks.v1.DeleteProcessRequest.newBuilder()
                     .setContainerId(containerId).setExecId(execId).build());

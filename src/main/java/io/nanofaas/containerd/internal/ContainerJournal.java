@@ -1,6 +1,7 @@
 package io.nanofaas.containerd.internal;
 
 import io.nanofaas.containerd.ContainerdException;
+import io.nanofaas.containerd.Identifiers;
 import io.nanofaas.containerd.NetworkAttachment;
 
 import java.io.IOException;
@@ -28,7 +29,7 @@ final class ContainerJournal {
     }
 
     static ContainerJournal read(Path directory, String id) {
-        ProtoMapper.requireValidId(id);
+        Identifiers.requireValid(id);
         Path path = directory.resolve(id).resolve("lifecycle.properties");
         Properties values = new Properties();
         try (var in = Files.newInputStream(path)) {

@@ -22,15 +22,16 @@ public final class ChainIds {
         }
         String current = diffIds.get(0);
         for (int i = 1; i < diffIds.size(); i++) {
-            current = sha256(current + " " + diffIds.get(i));
+            current = "sha256:" + sha256Hex(current + " " + diffIds.get(i));
         }
         return current;
     }
 
-    private static String sha256(String s) {
+    /** Lowercase hex SHA-256 of the string's UTF-8 bytes. */
+    static String sha256Hex(String s) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return "sha256:" + HexFormat.of().formatHex(digest.digest(s.getBytes(StandardCharsets.UTF_8)));
+            return HexFormat.of().formatHex(digest.digest(s.getBytes(StandardCharsets.UTF_8)));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 not available", e);
         }

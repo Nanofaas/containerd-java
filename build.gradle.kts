@@ -26,9 +26,9 @@ val junitVersion = "5.11.4"
 val junitPlatformVersion = "1.11.4"
 val assertjVersion = "3.27.3"
 val javaxAnnotationVersion = "1.3.2"
+val libcniVersion = "0.22.0"
 
 repositories {
-    mavenLocal { content { includeGroup("io.libcni") } }
     mavenCentral()
     // libcni-java, for the optional CNI source set. GitHub Packages needs credentials even to
     // read a public package, unlike Maven Central: a token with read:packages. Declared for the
@@ -137,6 +137,7 @@ tasks.jacocoTestReport {
     }))
 }
 
+
 // ---- CNI networking (optional, published separately) ----
 // A source set rather than part of main: it pulls libcni-java and, through it, Gson, and this
 // library's core has no JSON dependency by design. Consumers who do not want CNI never see either.
@@ -146,7 +147,7 @@ cni.compileClasspath += sourceSets.main.get().output
 cni.runtimeClasspath += sourceSets.main.get().output
 
 dependencies {
-    "cniImplementation"("io.libcni:libcni-java:0.22.0")
+    "cniImplementation"("io.libcni:libcni-java:$libcniVersion")
     "cniImplementation"("org.slf4j:slf4j-api:$slf4jVersion")
 }
 
@@ -199,7 +200,7 @@ publishing {
                 val dependencies = asNode().appendNode("dependencies")
                 for ((group, artifact, version) in listOf(
                     Triple("io.nanofaas", "containerd-java", project.version.toString()),
-                    Triple("io.libcni", "libcni-java", "0.22.0")
+                    Triple("io.libcni", "libcni-java", libcniVersion)
                 )) {
                     dependencies.appendNode("dependency").apply {
                         appendNode("groupId", group)
@@ -259,7 +260,6 @@ tasks.register<Sync>("e2eDistribution") {
     from(sourceSets.main.get().output) { into("classes") }
     from(cni.output) { into("classes") }
     from(e2e.runtimeClasspath.filter { it.isFile && it.name.endsWith(".jar") }) { into("lib") }
-    from(configurations["e2eRuntimeClasspath"].filter { it.name.endsWith(".jar") }) { into("lib") }
 }
 
 // ---- integration tests (require a real containerd; not part of `check`) ----
@@ -275,45 +275,40 @@ integrationTest.runtimeClasspath += files(sourceSets.main.get().output)
 integrationTest.compileClasspath += sourceSets["cni"].output + configurations["cniRuntimeClasspath"]
 integrationTest.runtimeClasspath += sourceSets["cni"].output + configurations["cniRuntimeClasspath"]
 
-val integrationTestTask = tasks.register<Test>("integrationTest") {
-    description = "Runs integration tests against a real containerd on /run/containerd/containerd.sock"
-    group = "verification"
-    testClassesDirs = integrationTest.output.classesDirs
-    classpath = integrationTest.runtimeClasspath
-    useJUnitPlatform()
+// Every -Dio.nanofaas.containerd.* reaches the tests; each test owns its defaults (the socket is
+// /run/containerd/containerd.sock unless told otherwise, and the rootless test has none).
+fun integrationTestTask(name: String, description: String, configure: Test.() -> Unit) =
+    tasks.register<Test>(name) {
+        this.description = description
+        group = "verification"
+        testClassesDirs = integrationTest.output.classesDirs
+        classpath = integrationTest.runtimeClasspath
+        useJUnitPlatform()
+        System.getProperties().stringPropertyNames().filter { it.startsWith("io.nanofaas.containerd.") }
+            .forEach { systemProperty(it, System.getProperty(it)) }
+        testLogging { events("failed", "skipped") }
+        configure()
+    }
+
+integrationTestTask("integrationTest", "Runs integration tests against a real containerd") {
     // The CNI tests need root and installed plugins, which the rest do not. Kept out so that a
     // skip in this task still means something is wrong.
     filter {
         excludeTestsMatching("io.nanofaas.containerd.Cni*IT")
         excludeTestsMatching("io.nanofaas.containerd.Rootless*IT")
     }
-    systemProperty("io.nanofaas.containerd.socket", System.getProperty("io.nanofaas.containerd.socket", "/run/containerd/containerd.sock"))
-    testLogging { events("failed", "skipped") }
 }
 
-tasks.register<Test>("cniIntegrationTest") {
-    description = "Runs the CNI networking tests; needs root and CNI plugins in /opt/cni/bin"
-    group = "verification"
-    testClassesDirs = integrationTest.output.classesDirs
-    classpath = integrationTest.runtimeClasspath
-    useJUnitPlatform()
+integrationTestTask("cniIntegrationTest",
+    "Runs the CNI networking tests; needs root and CNI plugins in /opt/cni/bin") {
     // By name: every CNI test is Cni…IT, so a new one joins this task rather than silently
     // landing in the other and failing there for want of root.
     filter { includeTestsMatching("io.nanofaas.containerd.Cni*IT") }
-    systemProperty("io.nanofaas.containerd.socket",
-        System.getProperty("io.nanofaas.containerd.socket", "/run/containerd/containerd.sock"))
-    testLogging { events("failed", "skipped") }
 }
 
-tasks.register<Test>("rootlessIntegrationTest") {
-    description = "Verifies delegated cgroup v2 limits against a rootless containerd"
-    group = "verification"
-    testClassesDirs = integrationTest.output.classesDirs
-    classpath = integrationTest.runtimeClasspath
-    useJUnitPlatform()
+integrationTestTask("rootlessIntegrationTest",
+    "Verifies delegated cgroup v2 limits against a rootless containerd") {
     filter { includeTestsMatching("io.nanofaas.containerd.Rootless*IT") }
-    System.getProperties().stringPropertyNames().filter { it.startsWith("io.nanofaas.containerd.") }
-        .forEach { systemProperty(it, System.getProperty(it)) }
     testLogging { events("failed", "skipped", "passed") }
 }
 
@@ -363,13 +358,11 @@ tasks.register<JavaExec>("sonarAnalysis") {
     classpath = sonar.runtimeClasspath
     // The scanner reads compiled classes and test results, so make sure they are there.
     dependsOn(tasks.named("build"))
-    systemProperty("io.nanofaas.containerd.socket",
-        System.getProperty("io.nanofaas.containerd.socket", "/run/containerd/containerd.sock"))
     args = (findProperty("sonarArgs") as String? ?: "").split(" ").filter { it.isNotBlank() }
 }
 
 // The runnable example gets an SLF4J backend on the `run` classpath only. Using `runtimeOnly`
-// (as the plan suggested) would publish slf4j-simple to every consumer of this library, which
+// would publish slf4j-simple to every consumer of this library, which
 // the spec forbids ("slf4j-simple is test/example scope only") and which would collide with a
 // consumer's own SLF4J binding. A dedicated configuration keeps it off the published classpath.
 val exampleLogging = configurations.create("exampleLogging")

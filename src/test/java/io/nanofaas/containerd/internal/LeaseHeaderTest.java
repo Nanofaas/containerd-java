@@ -157,7 +157,7 @@ class LeaseHeaderTest {
     @Test
     void theSnapshotAndTheContainerAreBothCreatedUnderTheLease() throws Exception {
         try (var fake = new FakeContainerd()) {
-            new ContainersServiceImpl(fake.channel, "overlayfs", "io.containerd.runc.v2", null)
+            TestServices.containers(fake.channel)
                     .create(ContainerSpec.builder().id("leased-1").image("scratch:latest").build());
 
             assertThat(fake.spy.leaseByMethod)
@@ -171,7 +171,7 @@ class LeaseHeaderTest {
     @Test
     void theLeaseIsReleasedOnceTheContainerOwnsTheSnapshot() throws Exception {
         try (var fake = new FakeContainerd()) {
-            new ContainersServiceImpl(fake.channel, "overlayfs", "io.containerd.runc.v2", null)
+            TestServices.containers(fake.channel)
                     .create(ContainerSpec.builder().id("leased-2").image("scratch:latest").build());
 
             // Delete reaches the Leases service: held any longer, the lease would keep resources

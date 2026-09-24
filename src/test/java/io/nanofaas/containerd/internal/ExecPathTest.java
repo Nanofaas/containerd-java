@@ -150,7 +150,7 @@ class ExecPathTest {
     }
 
     private static ContainersServiceImpl service(FakeShim fake) {
-        return new ContainersServiceImpl(fake.channel, "overlayfs", "io.containerd.runc.v2", null);
+        return TestServices.containers(fake.channel);
     }
 
     @Test
@@ -233,7 +233,7 @@ class ExecPathTest {
     @Test
     void rejectsExecWhenThereIsNoTask() throws Exception {
         try (var fake = new FakeShim()) {
-            var containers = new ContainersServiceImpl(fake.channel, "overlayfs", "io.containerd.runc.v2", null);
+            var containers = TestServices.containers(fake.channel);
             fake.channel.shutdownNow(); // no task lookup possible
             var command = List.of("/bin/true");
             assertThatThrownBy(() -> containers.exec("gone", command))

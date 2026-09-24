@@ -19,7 +19,7 @@ class ImageConfigMergeTest {
     }
 
     private static String specJson(ContainerSpec spec, ImageConfig image) {
-        return OciSpecBuilder.buildContainerSpec(spec, image).getValue().toStringUtf8();
+        return OciSpecBuilder.buildContainerSpec(spec, image, List.of()).getValue().toStringUtf8();
     }
 
     private static ImageConfig image(List<String> entrypoint, List<String> cmd, List<String> env,
@@ -131,7 +131,7 @@ class ImageConfigMergeTest {
         // docker exec behaves this way, and without it nothing the image ships is on PATH.
         var container = new StoredSpec(
                 List.of("PATH=/opt/java/openjdk/bin", "PGDATA=/var/lib/postgresql/data"),
-                "/opt/sonarqube");
+                "/opt/sonarqube", null);
 
         String json = OciSpecBuilder.buildExecSpec(List.of("env"), Map.of(), null,
                 container.env(), container.workingDir(), container.rlimits()).getValue().toStringUtf8();
@@ -143,7 +143,7 @@ class ImageConfigMergeTest {
 
     @Test
     void anExecsOwnEnvironmentAndWorkingDirectoryStillWin() {
-        var container = new StoredSpec(List.of("MODE=container"), "/opt/sonarqube");
+        var container = new StoredSpec(List.of("MODE=container"), "/opt/sonarqube", null);
 
         String json = OciSpecBuilder.buildExecSpec(List.of("env"), Map.of("MODE", "exec"), "/tmp",
                 container.env(), container.workingDir(), container.rlimits()).getValue().toStringUtf8();
@@ -158,7 +158,7 @@ class ImageConfigMergeTest {
         // just to its entrypoint. The runtime's own default (1024 open files) is what fills the
         // gap otherwise, and nothing reports that it did.
         var spec = ContainerSpec.builder().id("limited").image("alpine").openFilesLimit(4096).build();
-        var stored = StoredSpec.parse(OciSpecBuilder.buildContainerSpec(spec, ImageConfig.EMPTY));
+        var stored = StoredSpec.parse(OciSpecBuilder.buildContainerSpec(spec, ImageConfig.EMPTY, List.of()));
 
         String json = OciSpecBuilder.buildExecSpec(List.of("sh"), Map.of(), null,
                 stored.env(), stored.workingDir(), stored.rlimits()).getValue().toStringUtf8();

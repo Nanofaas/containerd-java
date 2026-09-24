@@ -1,8 +1,6 @@
 # NanoFaaS containerd Java Client — Specification
 
-> Verbatim spec for the NanoFaaS containerd client library. The implementation
-> plan in `docs/superpowers/plans/2026-09-02-containerd-java-client.md` argues
-> from this document.
+> Verbatim spec for the NanoFaaS containerd client library.
 
 ## 1. Main objective
 

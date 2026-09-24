@@ -8,7 +8,6 @@ import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
 import io.nanofaas.containerd.ContainerdException;
 import io.nanofaas.containerd.ContainerState;
-import io.nanofaas.containerd.TaskNotFoundException;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.TimeUnit;
@@ -18,8 +17,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * The Tasks facade must never let a raw gRPC exception escape, and must look a task up in a
- * single round trip (an exists()+inspect() pair races with a task exiting in between).
+ * TasksServiceImpl must never let a raw gRPC exception escape, and must look a task up in a
+ * single round trip.
  */
 class TaskLookupAndErrorMappingTest {
 
@@ -85,13 +84,13 @@ class TaskLookupAndErrorMappingTest {
     @Test
     void findLooksTheTaskUpInASingleRoundTrip() throws Exception {
         try (var fake = new FakeTasks()) {
-            var task = new TasksServiceImpl(fake.channel).find("abc");
+            var task = TestServices.tasks(fake.channel).find("abc");
 
             assertThat(task).isPresent();
             assertThat(task.get().containerId()).isEqualTo("abc");
             assertThat(task.get().pid()).isEqualTo(4242);
             assertThat(task.get().state()).isEqualTo(ContainerState.RUNNING);
-            assertThat(fake.getCalls.get()).as("one Get, not exists()+inspect()").isEqualTo(1);
+            assertThat(fake.getCalls.get()).as("a single Get").isEqualTo(1);
         }
     }
 
@@ -99,35 +98,22 @@ class TaskLookupAndErrorMappingTest {
     void findIsEmptyForAMissingTask() throws Exception {
         try (var fake = new FakeTasks()) {
             fake.taskExists = false;
-            assertThat(new TasksServiceImpl(fake.channel).find("abc")).isEmpty();
+            assertThat(TestServices.tasks(fake.channel).find("abc")).isEmpty();
             assertThat(fake.getCalls.get()).isEqualTo(1);
         }
     }
 
     @Test
-    void inspectThrowsTypedNotFoundForAMissingTask() throws Exception {
-        try (var fake = new FakeTasks()) {
-            fake.taskExists = false;
-            // Constructed outside the lambda: were it inside and failing, the assertion would
-            // pass on the constructor's exception without inspect() ever running.
-            var tasks = new TasksServiceImpl(fake.channel);
-            assertThatThrownBy(() -> tasks.inspect("abc"))
-                    .isInstanceOf(TaskNotFoundException.class)
-                    .isNotInstanceOf(StatusRuntimeException.class);
-        }
-    }
-
-    @Test
-    void startInspectAndListMapGrpcFailuresToLibraryExceptions() throws Exception {
+    void startFindAndListMapGrpcFailuresToLibraryExceptions() throws Exception {
         try (var fake = new FakeTasks()) {
             fake.failWith = Status.INTERNAL.withDescription("shim died");
-            var tasks = new TasksServiceImpl(fake.channel);
+            var tasks = TestServices.tasks(fake.channel);
 
             // Before the fix these three threw StatusRuntimeException, which no caller
             // catching ContainerdException would ever see.
             assertThatThrownBy(() -> tasks.start("abc"))
                     .isInstanceOf(ContainerdException.class).isNotInstanceOf(StatusRuntimeException.class);
-            assertThatThrownBy(() -> tasks.inspect("abc"))
+            assertThatThrownBy(() -> tasks.find("abc"))
                     .isInstanceOf(ContainerdException.class).isNotInstanceOf(StatusRuntimeException.class);
             assertThatThrownBy(tasks::list)
                     .isInstanceOf(ContainerdException.class).isNotInstanceOf(StatusRuntimeException.class);
@@ -138,7 +124,7 @@ class TaskLookupAndErrorMappingTest {
     void mappedExceptionsCarryContainerdsOwnExplanation() throws Exception {
         try (var fake = new FakeTasks()) {
             fake.failWith = Status.INTERNAL.withDescription("shim died");
-            assertThatThrownBy(() -> new TasksServiceImpl(fake.channel).start("abc"))
+            assertThatThrownBy(() -> TestServices.tasks(fake.channel).start("abc"))
                     .hasMessageContaining("shim died")
                     .hasMessageContaining("INTERNAL");
         }

@@ -87,7 +87,7 @@ class ImageRootfsResolverTest {
         try {
             ManagedChannel channel = InProcessChannelBuilder.forName(name).directExecutor().build();
             try {
-                String chainId = new ImageRootfsResolver(channel).resolveChainId("alpine:latest");
+                String chainId = new ImageRootfsResolver(channel).resolve("alpine:latest").chainId();
                 assertThat(chainId).isEqualTo(ChainIds.chainId(List.of("sha256:d1", "sha256:d2")));
             } finally {
                 channel.shutdownNow();

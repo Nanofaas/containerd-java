@@ -30,6 +30,7 @@ class EventsServiceImplTest {
         final CountDownLatch streamOpen = new CountDownLatch(1);
         final CountDownLatch streamCancelled = new CountDownLatch(1);
         final AtomicReference<StreamObserver<containerd.types.Envelope>> stream = new AtomicReference<>();
+        final AtomicReference<containerd.services.events.v1.SubscribeRequest> request = new AtomicReference<>();
 
         FakeEvents() throws Exception {
             String name = InProcessServerBuilder.generateName();
@@ -41,6 +42,7 @@ class EventsServiceImplTest {
                                                       StreamObserver<containerd.types.Envelope> o) {
                                     ((ServerCallStreamObserver<containerd.types.Envelope>) o)
                                             .setOnCancelHandler(streamCancelled::countDown);
+                                    FakeEvents.this.request.set(request);
                                     stream.set(o);
                                     streamOpen.countDown();
                                 }
@@ -84,6 +86,20 @@ class EventsServiceImplTest {
         @Override
         public void close() {
             root.removeHandler(handler);
+        }
+    }
+
+    @Test
+    void subscribingScopesTheStreamToTheNamespaceAndNothingElse() throws Exception {
+        // Topics are selected client-side: this containerd's fieldpath parser rejects combined
+        // filters and silently falls back to an unfiltered stream.
+        try (var fake = new FakeEvents()) {
+            var events = new EventsServiceImpl(fake.channel, "nanofaas");
+            events.subscribe(EventFilter.topics("/tasks/start", "/tasks/exit"), e -> { });
+            assertThat(fake.streamOpen.await(5, TimeUnit.SECONDS)).isTrue();
+
+            assertThat(fake.request.get().getFiltersList()).containsExactly("namespace==nanofaas");
+            events.close();
         }
     }
 

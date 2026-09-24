@@ -11,10 +11,6 @@ public final class ProtoMapper {
     private ProtoMapper() {
     }
 
-    public static String requireValidId(String id) {
-        return Identifiers.requireValid(id);
-    }
-
     public static Container map(containerd.services.containers.v1.Container c) {
         return new Container(
                 c.getId(),
@@ -37,8 +33,7 @@ public final class ProtoMapper {
     /**
      * Maps containerd's task status. Anything the vendored v2.2.1 enum does not define — a value
      * from a newer containerd, or UNRECOGNIZED — becomes {@link ContainerState#UNKNOWN} rather
-     * than being guessed at. containerd 2.2.1 defines no STARTING status; the constant exists for
-     * callers that model that state themselves.
+     * than being guessed at.
      */
     public static ContainerState mapStatus(containerd.v1.types.Status status) {
         return switch (status) {

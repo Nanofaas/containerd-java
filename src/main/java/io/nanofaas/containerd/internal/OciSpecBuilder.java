@@ -74,28 +74,12 @@ public final class OciSpecBuilder {
     private OciSpecBuilder() {
     }
 
-    /** Builds the full OCI runtime spec for a container, ignoring any image configuration. */
-    public static Any buildContainerSpec(ContainerSpec spec) {
-        return buildContainerSpec(spec, ImageConfig.EMPTY);
-    }
-
     /**
      * Builds the full OCI runtime spec for a container as a typeurl Any (JSON payload), with the
      * image's configuration supplying what the caller left unset.
      *
      * @param spec the caller's wishes, which win wherever they are expressed
      * @param image the image's entrypoint, cmd, env, user and working directory
-     * @return the spec, ready to attach to a container
-     */
-    static Any buildContainerSpec(ContainerSpec spec, ImageConfig image) {
-        return buildContainerSpec(spec, image, List.of());
-    }
-
-    /**
-     * Builds the spec with mounts this library adds of its own, on top of the caller's.
-     *
-     * @param spec the caller's wishes
-     * @param image the image's configuration
      * @param extraMounts mounts the library adds, such as the resolv.conf a networked container gets
      * @return the spec, ready to attach to a container
      */
@@ -112,11 +96,6 @@ public final class OciSpecBuilder {
                 .putFields("mounts", buildStandardMounts(spec, extraMounts))
                 .putFields("linux", structValue(buildLinux(spec).build()));
         return toAny(SPEC_TYPE_URL, root.build());
-    }
-
-    /** Builds the process spec for exec, with nothing inherited from the container. */
-    public static Any buildExecSpec(List<String> command, Map<String, String> environment, String workingDir) {
-        return buildExecSpec(command, environment, workingDir, List.of(), null, null);
     }
 
     /**

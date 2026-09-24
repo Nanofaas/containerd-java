@@ -6,7 +6,6 @@ import io.nanofaas.containerd.spi.Containers;
 import io.nanofaas.containerd.spi.ContainerdClient;
 import io.nanofaas.containerd.spi.Events;
 import io.nanofaas.containerd.spi.Images;
-import io.nanofaas.containerd.spi.Tasks;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,38 +21,8 @@ public final class DefaultContainerdClient implements ContainerdClient {
     private final Images images;
     // Concrete type (not the Containers SPI) so close() can shut down its IO virtual-thread pool.
     private final ContainersServiceImpl containers;
-    private final Tasks tasks;
     // Concrete type (not the Events SPI) so close() can shut down its handler/reconnect executors.
     private final EventsServiceImpl events;
-
-    public DefaultContainerdClient(String socketPath, String namespace, String snapshotter,
-                                   String runtimeName, String runtimeBinaryName) {
-        this(socketPath, namespace, snapshotter, runtimeName, runtimeBinaryName,
-                ContainersServiceImpl.DEFAULT_STOP_TIMEOUT, null);
-    }
-
-    public DefaultContainerdClient(String socketPath, String namespace, String snapshotter,
-                                   String runtimeName, String runtimeBinaryName,
-                                   java.time.Duration stopTimeout) {
-        this(socketPath, namespace, snapshotter, runtimeName, runtimeBinaryName, stopTimeout, null);
-    }
-
-    public DefaultContainerdClient(String socketPath, String namespace, String snapshotter,
-                                   String runtimeName, String runtimeBinaryName,
-                                   java.time.Duration stopTimeout,
-                                   io.nanofaas.containerd.spi.ContainerNetwork network) {
-        this(socketPath, namespace, snapshotter, runtimeName, runtimeBinaryName, stopTimeout,
-                network, ContainersServiceImpl.DEFAULT_STATE_DIR);
-    }
-
-    public DefaultContainerdClient(String socketPath, String namespace, String snapshotter,
-                                   String runtimeName, String runtimeBinaryName,
-                                   java.time.Duration stopTimeout,
-                                   io.nanofaas.containerd.spi.ContainerNetwork network,
-                                   java.nio.file.Path stateDirectory) {
-        this(socketPath, namespace, snapshotter, runtimeName, runtimeBinaryName, stopTimeout, network,
-                stateDirectory, false);
-    }
 
     public DefaultContainerdClient(String socketPath, String namespace, String snapshotter,
                                    String runtimeName, String runtimeBinaryName,
@@ -73,24 +42,16 @@ public final class DefaultContainerdClient implements ContainerdClient {
                 new NamespaceInterceptor(namespace));
         log.debug("containerd client created (namespace={}, snapshotter={}, runtime={}, binaryName={})",
                 namespace, snapshotter, runtimeName, runtimeBinaryName);
-        // One shared facade per client, cached in a final field (the plan says "lazily", but a
-        // final field rules that out; building it here is free — it only constructs gRPC stubs).
+        // One shared facade per client; building them here is free — it only constructs gRPC stubs.
         this.images = new ImagesServiceImpl(channel, snapshotter);
         this.containers = new ContainersServiceImpl(channel, snapshotter, runtimeName, runtimeBinaryName, stopTimeout,
                 network, state, systemdCgroup);
-        this.tasks = new TasksServiceImpl(channel, runtimeBinaryName, systemdCgroup);
         this.events = new EventsServiceImpl(channel, namespace);
     }
 
     private static java.nio.file.Path scopedStateDirectory(java.nio.file.Path root, String socket, String namespace) {
         String identity = java.nio.file.Path.of(socket).toAbsolutePath().normalize() + "\0" + namespace;
-        try {
-            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(identity.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            return root.resolve("scope-" + java.util.HexFormat.of().formatHex(digest));
-        } catch (java.security.NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is required by the Java platform", e);
-        }
+        return root.resolve("scope-" + ChainIds.sha256Hex(identity));
     }
 
     @Override
@@ -101,11 +62,6 @@ public final class DefaultContainerdClient implements ContainerdClient {
     @Override
     public Containers containers() {
         return containers;
-    }
-
-    @Override
-    public Tasks tasks() {
-        return tasks;
     }
 
     @Override

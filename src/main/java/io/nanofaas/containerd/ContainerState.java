@@ -12,11 +12,6 @@ public enum ContainerState {
     PAUSED,
     /** The task is in the middle of being paused. */
     PAUSING,
-    /**
-     * The task is starting. containerd 2.2.1 never reports this; it exists for callers that model
-     * the gap between {@link #CREATED} and {@link #RUNNING} themselves.
-     */
-    STARTING,
     /** No task, or a status this client does not recognise. */
     UNKNOWN
 }

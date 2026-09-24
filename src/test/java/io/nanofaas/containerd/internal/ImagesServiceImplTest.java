@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class TransferImagePullerTest {
+class ImagesServiceImplTest {
 
     @Test
     void sendsRegistrySourceAndImageStoreDestination() throws Exception {
@@ -34,7 +34,7 @@ class TransferImagePullerTest {
         try {
             var channel = InProcessChannelBuilder.forName(name).directExecutor().build();
             try {
-                new TransferImagePuller(channel, "overlayfs")
+                new ImagesServiceImpl(channel, "overlayfs")
                         .pull("docker.io/library/alpine:latest", Platform.linuxAmd64());
 
                 Any source = captured.get().getSource();

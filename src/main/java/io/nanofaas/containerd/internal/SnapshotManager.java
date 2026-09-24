@@ -22,11 +22,6 @@ public final class SnapshotManager {
         this.stub = containerd.services.snapshots.v1.SnapshotsGrpc.newBlockingStub(channel);
     }
 
-    /** Prepares an active snapshot keyed by {@code key}, parented on {@code parent} (may be empty). */
-    public List<containerd.types.Mount> prepare(String snapshotter, String key, String parent) {
-        return prepare(snapshotter, key, parent, null);
-    }
-
     /**
      * Prepares a snapshot, optionally owned by a lease until something else references it.
      *
