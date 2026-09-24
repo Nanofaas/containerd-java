@@ -18,6 +18,7 @@ versions may carry breaking changes.
 
 ### Changed
 
+- `containerd-java-cni` depends on libcni-java 0.23.0.
 - `ContainerdClient.Builder` is a final class rather than an interface. Code that calls
   `ContainerdClient.builder()` compiles unchanged but must be recompiled.
 

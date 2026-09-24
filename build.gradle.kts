@@ -32,7 +32,7 @@ val junitVersion = "5.11.4"
 val junitPlatformVersion = "1.11.4"
 val assertjVersion = "3.27.3"
 val javaxAnnotationVersion = "1.3.2"
-val libcniVersion = "0.22.0"
+val libcniVersion = "0.23.0"
 val spotbugsVersion = "4.10.4"
 val errorProneVersion = "2.50.0"
 
