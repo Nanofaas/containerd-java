@@ -112,7 +112,7 @@ class ContainerStopTest {
     }
 
     private static ContainersServiceImpl service(WedgedTask fake, Duration stopTimeout) {
-        return TestServices.containers(fake.channel, stopTimeout, null, ContainersServiceImpl.DEFAULT_STATE_DIR);
+        return TestServices.containers(fake.channel, stopTimeout, null, TestServices.STATE_DIR);
     }
 
     @Test
