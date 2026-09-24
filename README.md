@@ -407,11 +407,11 @@ repositories {
 }
 ```
 
-When libcni-java happens to sit next to this repository it is built from source instead, so
-working on both at once needs neither a token nor a publish step. Pass
-`-PlibcniFromPackages=true` to use the published artifact anyway. CI never has the directory, so
-it always exercises the published path — a broken publish is caught there rather than by a
-consumer.
+Every build resolves that published artifact, CI and local alike, so a broken publish is caught
+here rather than by a consumer. Locally that needs a token with `read:packages`, as
+`GITHUB_ACTOR`/`GITHUB_TOKEN` or as `gpr.user`/`gpr.token` in `~/.gradle/gradle.properties`.
+To work on both libraries at once, name a libcni-java checkout explicitly and it is built from
+source instead: `./gradlew build -PlibcniDir=../libcni-java`. It is never picked up implicitly.
 
 The timing is the library's responsibility rather than the caller's, because it is easy to get
 wrong and expensive when you do: the namespace CNI configures is the task's, so it exists only
@@ -524,11 +524,10 @@ and in the transitive libcni artifact. Publication goes to GitHub Packages at
 match the version in `build.gradle.kts`. A push never publishes: a version cannot be
 published twice, so publishing from a branch would fail on the second commit.
 
-For a local source build with the sibling libcni checkout:
+To build against a local libcni-java checkout rather than the published artifact:
 
 ```sh
-(cd ../libcni-java && ./gradlew publishToMavenLocal)
-./gradlew test publishToMavenLocal -PlibcniFromPackages=true
+./gradlew test -PlibcniDir=../libcni-java
 ```
 
 Consumers need only the CNI coordinate when networking is required:
