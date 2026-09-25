@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ProtoMapperTest {
 
@@ -63,13 +62,6 @@ class ProtoMapperTest {
         assertThat(ProtoMapper.mapStatus(containerd.v1.types.Status.UNRECOGNIZED)).isEqualTo(ContainerState.UNKNOWN);
         assertThat(containerd.v1.types.Status.forNumber(6))
                 .as("v2.2.1 defines no status 6").isNull();
-    }
-
-    @Test
-    void rejectsInvalidContainerIds() {
-        assertThat(ProtoMapper.requireValidId("abc_1.2-3")).isEqualTo("abc_1.2-3");
-        assertThatThrownBy(() -> ProtoMapper.requireValidId("has space")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> ProtoMapper.requireValidId("")).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

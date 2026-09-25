@@ -30,11 +30,6 @@ record StoredSpec(List<String> env, String workingDir, Value rlimits) {
         env = List.copyOf(env);
     }
 
-    /** A spec whose limits are unknown, which is what a caller with only env and cwd has. */
-    StoredSpec(List<String> env, String workingDir) {
-        this(env, workingDir, null);
-    }
-
     /** Parses the stored spec, yielding {@link #EMPTY} for anything it cannot read. */
     static StoredSpec parse(Any spec) {
         if (spec == null || spec.getValue().isEmpty()) {

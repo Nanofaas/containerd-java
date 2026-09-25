@@ -34,7 +34,7 @@ public final class StatusExceptionMapper {
      * without it the message is just a bare code, which says nothing the type does not already.
      */
     private static String message(StatusRuntimeException e, ResourceKind kind) {
-        String message = "containerd " + kind.name().toLowerCase() + " operation failed: "
+        String message = "containerd " + kind.name().toLowerCase(java.util.Locale.ROOT) + " operation failed: "
                 + e.getStatus().getCode();
         String description = e.getStatus().getDescription();
         return description == null || description.isBlank() ? message : message + ": " + description;

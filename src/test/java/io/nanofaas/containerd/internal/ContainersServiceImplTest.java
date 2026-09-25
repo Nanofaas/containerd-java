@@ -66,7 +66,7 @@ class ContainersServiceImplTest {
                         public void info(containerd.services.content.v1.InfoRequest request,
                                          StreamObserver<containerd.services.content.v1.InfoResponse> responseObserver) {
                             byte[] data = request.getDigest().equals("sha256:config")
-                                    ? SCRATCH_CONFIG.getBytes() : SCRATCH_MANIFEST.getBytes();
+                                    ? SCRATCH_CONFIG.getBytes(java.nio.charset.StandardCharsets.UTF_8) : SCRATCH_MANIFEST.getBytes(java.nio.charset.StandardCharsets.UTF_8);
                             responseObserver.onNext(containerd.services.content.v1.InfoResponse.newBuilder()
                                     .setInfo(containerd.services.content.v1.Info.newBuilder()
                                             .setDigest(request.getDigest()).setSize(data.length)).build());
@@ -77,7 +77,7 @@ class ContainersServiceImplTest {
                         public void read(containerd.services.content.v1.ReadContentRequest request,
                                          StreamObserver<containerd.services.content.v1.ReadContentResponse> responseObserver) {
                             byte[] data = request.getDigest().equals("sha256:config")
-                                    ? SCRATCH_CONFIG.getBytes() : SCRATCH_MANIFEST.getBytes();
+                                    ? SCRATCH_CONFIG.getBytes(java.nio.charset.StandardCharsets.UTF_8) : SCRATCH_MANIFEST.getBytes(java.nio.charset.StandardCharsets.UTF_8);
                             responseObserver.onNext(containerd.services.content.v1.ReadContentResponse.newBuilder()
                                     .setOffset(0).setData(com.google.protobuf.ByteString.copyFrom(data)).build());
                             responseObserver.onCompleted();
@@ -132,7 +132,7 @@ class ContainersServiceImplTest {
     }
 
     private static ContainersServiceImpl service(FakeServer fake) {
-        return new ContainersServiceImpl(fake.channel, "overlayfs", "io.containerd.runc.v2", null);
+        return TestServices.containers(fake.channel);
     }
 
     private static ContainerSpec spec() {
@@ -222,8 +222,7 @@ class ContainersServiceImplTest {
                 try { java.nio.file.Files.createFile(state); }
                 catch (java.io.IOException e) { throw new java.io.UncheckedIOException(e); }
             };
-            var containers = new ContainersServiceImpl(fake.channel, "overlayfs", "io.containerd.runc.v2", null,
-                    java.time.Duration.ofSeconds(1), null, state);
+            var containers = TestServices.containers(fake.channel, java.time.Duration.ofSeconds(1), null, state);
             assertThatThrownBy(() -> containers.create(spec())).isInstanceOf(io.nanofaas.containerd.ContainerdException.class);
             assertThat(fake.created.get()).isNotNull();
             assertThat(fake.snapshotsRemoved.get()).as("daemon metadata still references this snapshot").isZero();

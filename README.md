@@ -49,7 +49,6 @@ ContainerdClient  (public entry point, AutoCloseable, one shared gRPC channel)
    ├── Images       pull / get / list / remove          (io.nanofaas.containerd.spi)
    ├── Containers   create / inspect / list / remove /
    │                start / stop / kill / wait / exec
-   ├── Tasks        low-level task ops (NanoFaaS fast path)
    └── Events       subscribe(filter, handler) → Subscription
    │
    ▼ (internal — never exposed in public signatures)
@@ -59,8 +58,8 @@ ContainerdClient  (public entry point, AutoCloseable, one shared gRPC channel)
    OciSpecBuilder         builds the OCI runtime spec as JSON (see below)
    SnapshotManager        prepare / mounts / remove, per snapshotter
    ImageRootfsResolver    manifest → config → diff_ids → ChainID
+   ImagesServiceImpl      pulls through the Transfer service
    IoManager              FIFO create/read/write for exec IO, on virtual threads
-   TransferImagePuller    drives the Transfer service for pulls
    EventMapper            envelope → typed Event/TaskEvent
 ```
 
@@ -135,7 +134,7 @@ client cancels any subscription still open.
 ## containerd configuration
 
 - Default socket: `/run/containerd/containerd.sock` (configurable via
-  `ContainerdClientBuilder.socketPath(...)`). The socket is typically root-owned; either run
+  `ContainerdClient.builder().socketPath(...)`). The socket is typically root-owned; either run
   the JVM as root, or add the running user to the group that owns the socket
   (`containerd.toml`'s `grpc.gid`).
 - Default runtime id: `io.containerd.runc.v2` (the standard v2 shim). Configurable via
@@ -291,9 +290,9 @@ concepts is the fastest way to reason about this library correctly:
 ## Design Notes
 
 1. **Architecture implemented:** layered client (`ContainerdClient` → `Images`/`Containers`/
-   `Tasks`/`Events` facades → generated gRPC stubs) over a single shared Netty-epoll channel on
+   `Events` facades → generated gRPC stubs) over a single shared Netty-epoll channel on
    the UDS; internal `GrpcChannelFactory`, `NamespaceInterceptor`, `ProtoMapper`,
-   `OciSpecBuilder`, `SnapshotManager`, `IoManager`, `TransferImagePuller`,
+   `OciSpecBuilder`, `SnapshotManager`, `IoManager`,
    `ImageRootfsResolver`, `EventMapper`.
 2. **containerd APIs used:** `version.v1.Version` (health), `containers.v1.Containers`
    (create/get/list/delete), `tasks.v1.Tasks` (create/start/kill/wait/delete/exec/delete-process),
@@ -342,28 +341,24 @@ concepts is the fastest way to reason about this library correctly:
     skip `Images.Get` on the hot path; use `View` (read-only) snapshots for function rootfs that
     never needs to be written to.
 
-### Notable implementation findings (post-plan corrections)
+### Notable implementation findings
 
-The implementation plan (`docs/superpowers/plans/2026-09-02-containerd-java-client.md`) records
-every place the verified containerd behavior diverged from the plan's initial code sketch, as
-`R1`–`R26` notes per task. The ones most likely to surprise a new contributor:
+Places where verified containerd behavior differs from what one would first assume:
 
-- **R21 (Task 10):** the default `Platform` is the **host** platform, not a hardcoded
+- **Platform:** the default `Platform` is the **host** platform, not a hardcoded
   `linux/amd64` — pulling an amd64 image on an arm64 host (or vice versa) silently produces a
   container whose init process fails with `exec format error`.
-- **R22 (Task 10):** the OCI spec JSON must serialize integral fields as bare integers, not
+- **Integral JSON numbers:** the OCI spec JSON must serialize integral fields as bare integers, not
   `1024.0` — `protobuf-java-util`'s `Struct`/`Value` model has no integer type, so
   `JsonSupport.print` post-processes integral doubles.
-- **R23/R24 (Task 11):** reading a FIFO cannot use `InputStream.readAllBytes()` (it seeks to
+- **FIFOs:** reading a FIFO cannot use `InputStream.readAllBytes()` (it seeks to
   size the read; pipes don't support seeking), and unblocking a pending exec-IO reader must only
   happen for readers still stuck in `open(2)` — unblocking a reader that already hit EOF blocks
   forever waiting for a reader that will never arrive.
-- **R25 (Task 12):** this containerd's event fieldpath filter parser rejects multi-clause
+- **Event filters:** this containerd's event fieldpath filter parser rejects multi-clause
   filters and any unquoted value containing `/`, silently falling back to an unfiltered stream
   rather than erroring — confirmed with a raw-stub probe of eight filter variants before
   settling on server-side namespace scoping + client-side topic matching.
-
-See the plan file for the full list and the verification each finding is based on.
 
 ## Snapshot ownership
 
@@ -412,11 +407,11 @@ repositories {
 }
 ```
 
-When libcni-java happens to sit next to this repository it is built from source instead, so
-working on both at once needs neither a token nor a publish step. Pass
-`-PlibcniFromPackages=true` to use the published artifact anyway. CI never has the directory, so
-it always exercises the published path — a broken publish is caught there rather than by a
-consumer.
+Every build resolves that published artifact, CI and local alike, so a broken publish is caught
+here rather than by a consumer. Locally that needs a token with `read:packages`, as
+`GITHUB_ACTOR`/`GITHUB_TOKEN` or as `gpr.user`/`gpr.token` in `~/.gradle/gradle.properties`.
+To work on both libraries at once, name a libcni-java checkout explicitly and it is built from
+source instead: `./gradlew build -PlibcniDir=../libcni-java`. It is never picked up implicitly.
 
 The timing is the library's responsibility rather than the caller's, because it is easy to get
 wrong and expensive when you do: the namespace CNI configures is the task's, so it exists only
@@ -529,11 +524,10 @@ and in the transitive libcni artifact. Publication goes to GitHub Packages at
 match the version in `build.gradle.kts`. A push never publishes: a version cannot be
 published twice, so publishing from a branch would fail on the second commit.
 
-For a local source build with the sibling libcni checkout:
+To build against a local libcni-java checkout rather than the published artifact:
 
 ```sh
-(cd ../libcni-java && ./gradlew publishToMavenLocal)
-./gradlew test publishToMavenLocal -PlibcniFromPackages=true
+./gradlew test -PlibcniDir=../libcni-java
 ```
 
 Consumers need only the CNI coordinate when networking is required:

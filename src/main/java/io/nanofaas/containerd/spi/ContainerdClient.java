@@ -1,6 +1,11 @@
 package io.nanofaas.containerd.spi;
 
 import io.nanofaas.containerd.Version;
+import io.nanofaas.containerd.internal.DefaultContainerdClient;
+
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.Objects;
 
 /**
  * A client for the containerd gRPC API.
@@ -18,9 +23,6 @@ public interface ContainerdClient extends AutoCloseable {
 
     /** {@return the container lifecycle facade: create, inspect, list, remove, start, stop, kill, wait, exec} */
     Containers containers();
-
-    /** {@return the low-level task facade, the NanoFaaS fast path} */
-    Tasks tasks();
 
     /** {@return the event stream facade} */
     Events events();
@@ -43,11 +45,29 @@ public interface ContainerdClient extends AutoCloseable {
 
     /** {@return a builder for a new client} */
     static Builder builder() {
-        return new ContainerdClientBuilder();
+        return new Builder();
     }
 
     /** Configures and creates a {@link ContainerdClient}. */
-    interface Builder {
+    final class Builder {
+
+        // containerd's documented default, and the whole point of this field is that socketPath()
+        // overrides it.
+        @SuppressWarnings("java:S1075")
+        private String socketPath = "/run/containerd/containerd.sock";
+        private String namespace = "nanofaas";
+        private String snapshotter = "overlayfs";
+        private String runtimeName = "io.containerd.runc.v2";
+        private String runtimeBinaryName;
+        private boolean systemdCgroup;
+        private Duration stopTimeout = Duration.ofSeconds(10);
+        private ContainerNetwork network;
+        // Null means "the client's default": the default belongs with the code that uses it, not
+        // spelled out a second time here where the two could drift.
+        private Path stateDirectory;
+
+        private Builder() {
+        }
 
         /**
          * Sets the Unix domain socket to connect to.
@@ -55,7 +75,10 @@ public interface ContainerdClient extends AutoCloseable {
          * @param socketPath socket path; defaults to {@code /run/containerd/containerd.sock}
          * @return this builder
          */
-        Builder socketPath(String socketPath);
+        public Builder socketPath(String socketPath) {
+            this.socketPath = Objects.requireNonNull(socketPath, "socketPath");
+            return this;
+        }
 
         /**
          * Sets the containerd namespace every call is scoped to.
@@ -63,7 +86,10 @@ public interface ContainerdClient extends AutoCloseable {
          * @param namespace namespace name; defaults to {@code nanofaas}
          * @return this builder
          */
-        Builder namespace(String namespace);
+        public Builder namespace(String namespace) {
+            this.namespace = Objects.requireNonNull(namespace, "namespace");
+            return this;
+        }
 
         /**
          * Sets the snapshotter for container root filesystems.
@@ -71,7 +97,10 @@ public interface ContainerdClient extends AutoCloseable {
          * @param snapshotter snapshotter name; defaults to {@code overlayfs}
          * @return this builder
          */
-        Builder snapshotter(String snapshotter);
+        public Builder snapshotter(String snapshotter) {
+            this.snapshotter = Objects.requireNonNull(snapshotter, "snapshotter");
+            return this;
+        }
 
         /**
          * Sets the runtime identifier passed to tasks.
@@ -79,7 +108,10 @@ public interface ContainerdClient extends AutoCloseable {
          * @param runtimeName runtime id; defaults to {@code io.containerd.runc.v2}
          * @return this builder
          */
-        Builder runtimeName(String runtimeName);
+        public Builder runtimeName(String runtimeName) {
+            this.runtimeName = Objects.requireNonNull(runtimeName, "runtimeName");
+            return this;
+        }
 
         /**
          * When set (e.g. {@code crun}), the runc-v2 shim is told to exec this OCI runtime binary
@@ -88,14 +120,20 @@ public interface ContainerdClient extends AutoCloseable {
          * @param runtimeBinaryName OCI runtime binary, or {@code null} for the shim's default
          * @return this builder
          */
-        Builder runtimeBinaryName(String runtimeBinaryName);
+        public Builder runtimeBinaryName(String runtimeBinaryName) {
+            this.runtimeBinaryName = runtimeBinaryName;
+            return this;
+        }
 
         /**
          * Configures the runc-v2 shim to use systemd cgroup management.
          * @param enabled true for delegated systemd cgroups; false by default
          * @return this builder
          */
-        Builder systemdCgroup(boolean enabled);
+        public Builder systemdCgroup(boolean enabled) {
+            this.systemdCgroup = enabled;
+            return this;
+        }
 
         /**
          * How long {@link Containers#stop} waits after SIGTERM before sending SIGKILL.
@@ -104,7 +142,14 @@ public interface ContainerdClient extends AutoCloseable {
          * @param stopTimeout grace period; must be positive
          * @return this builder
          */
-        Builder stopTimeout(java.time.Duration stopTimeout);
+        public Builder stopTimeout(Duration stopTimeout) {
+            Objects.requireNonNull(stopTimeout, "stopTimeout");
+            if (stopTimeout.isNegative() || stopTimeout.isZero()) {
+                throw new IllegalArgumentException("stopTimeout must be positive, got: " + stopTimeout);
+            }
+            this.stopTimeout = stopTimeout;
+            return this;
+        }
 
         /**
          * Attaches containers that ask for one to their network.
@@ -117,7 +162,10 @@ public interface ContainerdClient extends AutoCloseable {
          *        {@code containerd-java-cni}
          * @return this builder
          */
-        Builder network(ContainerNetwork network);
+        public Builder network(ContainerNetwork network) {
+            this.network = Objects.requireNonNull(network, "network");
+            return this;
+        }
 
         /**
          * Where per-container files this library owns are kept.
@@ -136,9 +184,15 @@ public interface ContainerdClient extends AutoCloseable {
          *        first needed by a lifecycle operation rather than at client construction
          * @return this builder
          */
-        Builder stateDirectory(java.nio.file.Path stateDirectory);
+        public Builder stateDirectory(Path stateDirectory) {
+            this.stateDirectory = Objects.requireNonNull(stateDirectory, "stateDirectory");
+            return this;
+        }
 
         /** {@return a client connected to the configured socket} */
-        ContainerdClient build();
+        public ContainerdClient build() {
+            return new DefaultContainerdClient(socketPath, namespace, snapshotter, runtimeName,
+                    runtimeBinaryName, stopTimeout, network, stateDirectory, systemdCgroup);
+        }
     }
 }

@@ -238,9 +238,8 @@ final class SonarStack implements AutoCloseable {
     /** The last {@code lines} lines a container wrote, or a note saying why they are unavailable. */
     private String tail(String id, int lines) {
         try {
-            String[] all = client.containers().logs(id).split("\n");
-            int from = Math.max(0, all.length - lines);
-            return String.join("\n", java.util.Arrays.copyOfRange(all, from, all.length));
+            List<String> all = client.containers().logs(id).lines().toList();
+            return String.join("\n", all.subList(Math.max(0, all.size() - lines), all.size()));
         } catch (RuntimeException e) {
             return "(could not read the container's log: " + e.getMessage() + ")";
         }

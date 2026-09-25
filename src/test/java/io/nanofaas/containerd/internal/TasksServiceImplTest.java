@@ -100,7 +100,7 @@ class TasksServiceImplTest {
     @Test
     void createPassesSnapshotMountsAsRootfs() throws Exception {
         try (var fake = new FakeTaskServer()) {
-            new TasksServiceImpl(fake.channel).create("abc");
+            TestServices.tasks(fake.channel).create("abc");
             var request = fake.created.get();
             assertThat(request.getContainerId()).isEqualTo("abc");
             assertThat(request.getRootfsList()).hasSize(1);
@@ -111,7 +111,7 @@ class TasksServiceImplTest {
     @Test
     void createFetchesContainerFirst() throws Exception {
         try (var fake = new FakeTaskServer()) {
-            new TasksServiceImpl(fake.channel).create("abc");
+            TestServices.tasks(fake.channel).create("abc");
             assertThat(fake.created.get()).isNotNull();
         }
     }

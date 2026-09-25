@@ -15,10 +15,6 @@ public final class GrpcChannelFactory {
     private GrpcChannelFactory() {
     }
 
-    public static ManagedChannel createUnixDomainSocketChannel(String socketPath) {
-        return createUnixDomainSocketChannel(socketPath, new ClientInterceptor[0]);
-    }
-
     /**
      * Creates a channel with the given {@link ClientInterceptor}s attached at the channel level
      * (via {@link NettyChannelBuilder#intercept}), so every call made through the returned channel
@@ -37,14 +33,12 @@ public final class GrpcChannelFactory {
                     "Netty epoll native transport is not available; add netty-transport-native-epoll with the linux-x86_64 or linux-aarch_64 classifier");
         }
         EpollEventLoopGroup eventLoopGroup = new EpollEventLoopGroup();
-        NettyChannelBuilder builder = NettyChannelBuilder.forAddress(new DomainSocketAddress(socketPath))
+        ManagedChannel channel = NettyChannelBuilder.forAddress(new DomainSocketAddress(socketPath))
                 .channelType(EpollDomainSocketChannel.class)
                 .eventLoopGroup(eventLoopGroup)
-                .usePlaintext();
-        if (interceptors != null && interceptors.length > 0) {
-            builder.intercept(interceptors);
-        }
-        ManagedChannel channel = builder.build();
+                .usePlaintext()
+                .intercept(interceptors)
+                .build();
         releaseEventLoopGroupOnTermination(channel, eventLoopGroup);
         return channel;
     }
@@ -59,6 +53,9 @@ public final class GrpcChannelFactory {
      * callback immediately when the state has already moved past the observed source, so no
      * transition can be missed.
      */
+    // shutdownGracefully() is not awaited: the quiet period runs on the group's own threads, off
+    // the caller's path.
+    @SuppressWarnings("FutureReturnValueIgnored")
     private static void releaseEventLoopGroupOnTermination(ManagedChannel channel,
                                                            EpollEventLoopGroup eventLoopGroup) {
         ConnectivityState state = channel.getState(false);

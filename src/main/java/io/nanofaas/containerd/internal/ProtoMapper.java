@@ -3,16 +3,11 @@ package io.nanofaas.containerd.internal;
 import io.nanofaas.containerd.*;
 
 import java.time.Instant;
-import java.util.Map;
 
 /** Conversions between containerd protobuf messages and the public model. */
 public final class ProtoMapper {
 
     private ProtoMapper() {
-    }
-
-    public static String requireValidId(String id) {
-        return Identifiers.requireValid(id);
     }
 
     public static Container map(containerd.services.containers.v1.Container c) {
@@ -22,7 +17,7 @@ public final class ProtoMapper {
                 c.getSnapshotter(),
                 c.getSnapshotKey(),
                 c.hasCreatedAt() ? Instant.ofEpochSecond(c.getCreatedAt().getSeconds(), c.getCreatedAt().getNanos()) : Instant.EPOCH,
-                Map.copyOf(c.getLabelsMap()));
+                c.getLabelsMap());
     }
 
     public static Image map(containerd.services.images.v1.Image i) {
@@ -31,14 +26,13 @@ public final class ProtoMapper {
                 i.getTarget().getDigest(),
                 i.getTarget().getSize(),
                 i.hasCreatedAt() ? Instant.ofEpochSecond(i.getCreatedAt().getSeconds(), i.getCreatedAt().getNanos()) : Instant.EPOCH,
-                Map.copyOf(i.getLabelsMap()));
+                i.getLabelsMap());
     }
 
     /**
      * Maps containerd's task status. Anything the vendored v2.2.1 enum does not define — a value
      * from a newer containerd, or UNRECOGNIZED — becomes {@link ContainerState#UNKNOWN} rather
-     * than being guessed at. containerd 2.2.1 defines no STARTING status; the constant exists for
-     * callers that model that state themselves.
+     * than being guessed at.
      */
     public static ContainerState mapStatus(containerd.v1.types.Status status) {
         return switch (status) {

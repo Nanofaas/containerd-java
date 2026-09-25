@@ -60,9 +60,6 @@ public final class ContainersServiceImpl implements Containers {
     static final Path DEFAULT_STATE_DIR =
             Path.of(System.getProperty("java.io.tmpdir"), "containerd-java-state");
 
-    /** Default grace period between SIGTERM and SIGKILL in {@link #stop(String)}. */
-    static final java.time.Duration DEFAULT_STOP_TIMEOUT = java.time.Duration.ofSeconds(10);
-
     /** How long {@link #close()} waits for in-flight exec IO before abandoning it. */
     static final java.time.Duration IO_SHUTDOWN_TIMEOUT = java.time.Duration.ofSeconds(5);
 
@@ -80,28 +77,6 @@ public final class ContainersServiceImpl implements Containers {
     private final io.nanofaas.containerd.spi.ContainerNetwork network;
     private final Path stateDirectory;
     private final ExecutorService ioExecutor = Executors.newVirtualThreadPerTaskExecutor();
-
-    public ContainersServiceImpl(ManagedChannel channel, String snapshotter, String runtimeName, String runtimeBinaryName) {
-        this(channel, snapshotter, runtimeName, runtimeBinaryName, DEFAULT_STOP_TIMEOUT, null);
-    }
-
-    public ContainersServiceImpl(ManagedChannel channel, String snapshotter, String runtimeName,
-                                 String runtimeBinaryName, java.time.Duration stopTimeout) {
-        this(channel, snapshotter, runtimeName, runtimeBinaryName, stopTimeout, null);
-    }
-
-    public ContainersServiceImpl(ManagedChannel channel, String snapshotter, String runtimeName,
-                                 String runtimeBinaryName, java.time.Duration stopTimeout,
-                                 io.nanofaas.containerd.spi.ContainerNetwork network) {
-        this(channel, snapshotter, runtimeName, runtimeBinaryName, stopTimeout, network, DEFAULT_STATE_DIR);
-    }
-
-    public ContainersServiceImpl(ManagedChannel channel, String snapshotter, String runtimeName,
-                                 String runtimeBinaryName, java.time.Duration stopTimeout,
-                                 io.nanofaas.containerd.spi.ContainerNetwork network,
-                                 Path stateDirectory) {
-        this(channel, snapshotter, runtimeName, runtimeBinaryName, stopTimeout, network, stateDirectory, false);
-    }
 
     public ContainersServiceImpl(ManagedChannel channel, String snapshotter, String runtimeName,
                                  String runtimeBinaryName, java.time.Duration stopTimeout,
@@ -121,7 +96,7 @@ public final class ContainersServiceImpl implements Containers {
 
     @Override
     public NetworkAttachment networkAttachment(String id) {
-        ProtoMapper.requireValidId(id);
+        Identifiers.requireValid(id);
         // An unavailable daemon is not an absent attachment.
         containerOf(id);
         var entry = ContainerJournal.read(stateDirectory, id);
@@ -136,7 +111,7 @@ public final class ContainersServiceImpl implements Containers {
 
     @Override
     public Container create(ContainerSpec spec) {
-        ProtoMapper.requireValidId(spec.id());
+        Identifiers.requireValid(spec.id());
         refusePendingCleanup(spec.id());
         if (spec.network() != null && network == null) {
             throw new ContainerdException("container " + spec.id() + " asks for network \""
@@ -260,7 +235,7 @@ public final class ContainersServiceImpl implements Containers {
         }
         Path resolvConf = resolvConfPath(spec.id());
         try {
-            Files.createDirectories(resolvConf.getParent());
+            Files.createDirectories(stateDirectory.resolve(spec.id()));
             Files.writeString(resolvConf, "");
             resolvConf.toFile().setReadable(true, false);
         } catch (IOException e) {
@@ -300,26 +275,16 @@ public final class ContainersServiceImpl implements Containers {
 
     private boolean containerExists(String id) {
         try {
-            stub.get(containerd.services.containers.v1.GetContainerRequest.newBuilder()
-                    .setId(id).build());
+            containerOf(id);
             return true;
-        } catch (StatusRuntimeException e) {
-            if (e.getStatus().getCode() == io.grpc.Status.Code.NOT_FOUND) {
-                return false;
-            }
-            throw StatusExceptionMapper.map(e, StatusExceptionMapper.ResourceKind.CONTAINER);
+        } catch (ContainerNotFoundException e) {
+            return false;
         }
     }
 
     @Override
     public ContainerStatus inspect(String id) {
-        containerd.services.containers.v1.Container container;
-        try {
-            container = stub.get(containerd.services.containers.v1.GetContainerRequest.newBuilder()
-                    .setId(id).build()).getContainer();
-        } catch (StatusRuntimeException e) {
-            throw StatusExceptionMapper.map(e, StatusExceptionMapper.ResourceKind.CONTAINER);
-        }
+        var container = containerOf(id);
         ContainerState state = ContainerState.UNKNOWN;
         int pid = -1;
         ExitStatus exitStatus = null;
@@ -353,7 +318,7 @@ public final class ContainersServiceImpl implements Containers {
             return;
         }
         try (var entries = Files.list(dir)) {
-            for (var entry : entries.filter(path -> !path.getFileName().toString().equals("lifecycle.properties")).toList()) {
+            for (var entry : entries.filter(path -> !path.endsWith("lifecycle.properties")).toList()) {
                 Files.deleteIfExists(entry);
             }
             Files.deleteIfExists(dir.resolve("lifecycle.properties"));
@@ -395,7 +360,7 @@ public final class ContainersServiceImpl implements Containers {
 
     @Override
     public void remove(String id, RemoveOptions options) {
-        ProtoMapper.requireValidId(id);
+        Identifiers.requireValid(id);
         var entry = journal(id);
         if (entry == null) {
             if (runtimeTask(id) != null) {
@@ -504,7 +469,7 @@ public final class ContainersServiceImpl implements Containers {
         TaskInfo existing = tasks.find(id).orElse(null);
         if (existing != null && existing.state() != ContainerState.STOPPED) {
             throw new ContainerStartException("task for container " + id + " already exists in state "
-                    + existing.state(), null);
+                    + existing.state());
         }
         if (existing != null && existing.state() == ContainerState.STOPPED) {
             log.debug("task for container {} is stopped; deleting before restart", id);
@@ -519,7 +484,7 @@ public final class ContainersServiceImpl implements Containers {
             return pid;
         } catch (RuntimeException e) {
             try {
-                if (taskCreated && tasks.exists(id)) {
+                if (taskCreated && tasks.find(id).isPresent()) {
                     tasks.kill(id, Signal.KILL);
                     tasks.wait(id, stopTimeout);
                     tasks.delete(id);
@@ -680,7 +645,7 @@ public final class ContainersServiceImpl implements Containers {
 
     @Override
     public ExitStatus wait(String id) {
-        return tasks.wait(id);
+        return tasks.wait(id, null);
     }
 
     @Override
@@ -799,9 +764,8 @@ public final class ContainersServiceImpl implements Containers {
     /** Returns the OCI spec containerd stores on the container, or null if it cannot be read. */
     private com.google.protobuf.Any containerSpecOf(String id) {
         try {
-            return stub.get(containerd.services.containers.v1.GetContainerRequest.newBuilder()
-                    .setId(id).build()).getContainer().getSpec();
-        } catch (StatusRuntimeException e) {
+            return containerOf(id).getSpec();
+        } catch (ContainerdException e) {
             log.debug("could not read the stored spec for {}; exec runs without its environment", id, e);
             return null;
         }

@@ -4,6 +4,24 @@ All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the major version is 0, minor
 versions may carry breaking changes.
 
+## [Unreleased]
+
+### Removed
+
+- **`ContainerdClient.tasks()` and the `Tasks` interface.** They skipped the lifecycle that
+  `Containers` manages: `tasks().start` left a networked container without its network,
+  `tasks().delete` never released its address, and neither honoured pending cleanup. Use
+  `Containers.start`/`stop`/`kill`/`wait`/`inspect` instead.
+- `ContainerState.STARTING`. containerd never reports it and this client never produced it.
+- `EventFilter.toFieldpathFilters`. It ignored the filter and only built the namespace
+  scope, which is now internal to the events service.
+
+### Changed
+
+- `containerd-java-cni` depends on libcni-java 0.23.0.
+- `ContainerdClient.Builder` is a final class rather than an interface. Code that calls
+  `ContainerdClient.builder()` compiles unchanged but must be recompiled.
+
 ## [0.22.0]
 
 - Persist network attachments and cleanup ownership atomically; expose `networkAttachment` and

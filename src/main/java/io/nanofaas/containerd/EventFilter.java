@@ -36,18 +36,4 @@ public final class EventFilter {
     public List<String> topics() {
         return topics;
     }
-
-    /**
-     * The server-side fieldpath filter for SubscribeRequest: scope the stream to the client's
-     * namespace. This is the filter the Events service documents ({@code namespace==<ns>}) and
-     * the only one this containerd reliably applies on its own. Topic selection is done
-     * client-side, because this containerd's fieldpath parser rejects multi-filter combinations
-     * (and unquoted {@code /} values) and silently falls back to an unfiltered stream.
-     *
-     * @param namespace namespace to scope the stream to
-     * @return the fieldpath filters to send in SubscribeRequest
-     */
-    public List<String> toFieldpathFilters(String namespace) {
-        return List.of("namespace==" + namespace);
-    }
 }

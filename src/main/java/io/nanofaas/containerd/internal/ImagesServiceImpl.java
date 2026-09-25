@@ -4,6 +4,7 @@ import io.grpc.ManagedChannel;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.nanofaas.containerd.Image;
+import io.nanofaas.containerd.ImagePullException;
 import io.nanofaas.containerd.Platform;
 import io.nanofaas.containerd.spi.Images;
 import org.slf4j.Logger;
@@ -11,16 +12,22 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
+/**
+ * Image operations. Pulls go through containerd's Transfer service (the mechanism ctr uses):
+ * registry source + image-store destination with unpacking into the snapshotter.
+ */
 public final class ImagesServiceImpl implements Images {
 
     private static final Logger log = LoggerFactory.getLogger(ImagesServiceImpl.class);
 
     private final containerd.services.images.v1.ImagesGrpc.ImagesBlockingStub stub;
-    private final TransferImagePuller puller;
+    private final containerd.services.transfer.v1.TransferGrpc.TransferBlockingStub transfer;
+    private final String snapshotter;
 
     public ImagesServiceImpl(ManagedChannel channel, String snapshotter) {
         this.stub = containerd.services.images.v1.ImagesGrpc.newBlockingStub(channel);
-        this.puller = new TransferImagePuller(channel, snapshotter);
+        this.transfer = containerd.services.transfer.v1.TransferGrpc.newBlockingStub(channel);
+        this.snapshotter = snapshotter;
     }
 
     @Override
@@ -30,7 +37,30 @@ public final class ImagesServiceImpl implements Images {
 
     @Override
     public void pull(String reference, Platform platform) {
-        puller.pull(reference, platform);
+        log.debug("pull start: reference={} platform={}/{} snapshotter={}",
+                reference, platform.os(), platform.architecture(), snapshotter);
+        var protoPlatform = ProtoMapper.toProto(platform);
+        var source = containerd.types.transfer.OCIRegistry.newBuilder()
+                .setReference(reference)
+                .build();
+        var destination = containerd.types.transfer.ImageStore.newBuilder()
+                .setName(reference)
+                .addPlatforms(protoPlatform)
+                .setAllMetadata(true)
+                .addUnpacks(containerd.types.transfer.UnpackConfiguration.newBuilder()
+                        .setPlatform(protoPlatform)
+                        .setSnapshotter(snapshotter))
+                .build();
+        try {
+            // The Transfer RPC blocks until the transfer completes.
+            transfer.transfer(containerd.services.transfer.v1.TransferRequest.newBuilder()
+                    .setSource(TypeUrls.pack(source))
+                    .setDestination(TypeUrls.pack(destination))
+                    .build());
+        } catch (StatusRuntimeException e) {
+            throw new ImagePullException("failed to pull image " + reference + ": " + e.getStatus(), e);
+        }
+        log.debug("pull complete: reference={}", reference);
     }
 
     @Override

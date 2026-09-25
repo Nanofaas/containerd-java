@@ -112,7 +112,7 @@ class ContainerStopTest {
     }
 
     private static ContainersServiceImpl service(WedgedTask fake, Duration stopTimeout) {
-        return new ContainersServiceImpl(fake.channel, "overlayfs", "io.containerd.runc.v2", null, stopTimeout);
+        return TestServices.containers(fake.channel, stopTimeout, null, TestServices.STATE_DIR);
     }
 
     @Test

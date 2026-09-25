@@ -39,11 +39,6 @@ public final class ImageRootfsResolver {
     record ResolvedImage(String chainId, ImageConfig config) {
     }
 
-    /** Returns only the ChainID; see {@link #resolve} when the configuration is needed too. */
-    public String resolveChainId(String imageName) {
-        return resolve(imageName).chainId();
-    }
-
     /**
      * Resolves an image to its snapshot parent key and run configuration, reading the manifest
      * and config blobs once for both.

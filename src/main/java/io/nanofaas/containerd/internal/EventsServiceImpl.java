@@ -34,7 +34,14 @@ public final class EventsServiceImpl implements Events {
     private static final long MAX_BACKOFF_MS = 30_000;
 
     private final containerd.services.events.v1.EventsGrpc.EventsStub stub;
-    private final String namespace;
+    /**
+     * The server-side fieldpath filter: scope the stream to the client's namespace. This is the
+     * filter the Events service documents and the only one this containerd reliably applies on its
+     * own. Topic selection is done client-side, because this containerd's fieldpath parser rejects
+     * multi-filter combinations (and unquoted {@code /} values) and silently falls back to an
+     * unfiltered stream.
+     */
+    private final String namespaceFilter;
     /** Set once {@link #close()} runs: stops every subscription and every executor submission. */
     private final AtomicBoolean closed = new AtomicBoolean(false);
     /** Live subscriptions, so {@link #close()} can cancel their in-flight gRPC calls. */
@@ -50,12 +57,12 @@ public final class EventsServiceImpl implements Events {
 
     public EventsServiceImpl(ManagedChannel channel, String namespace) {
         this.stub = containerd.services.events.v1.EventsGrpc.newStub(channel);
-        this.namespace = namespace;
+        this.namespaceFilter = "namespace==" + namespace;
     }
 
     @Override
     public Subscription subscribe(EventFilter filter, Consumer<Event> handler) {
-        log.debug("events subscribe: filters={}", filter.toFieldpathFilters(namespace));
+        log.debug("events subscribe: filter={} topics={}", namespaceFilter, filter.topics());
         var subscription = new StreamSubscription(filter, handler);
         subscriptions.add(subscription);
         if (closed.get()) { // the client was closed concurrently with this call
@@ -113,7 +120,7 @@ public final class EventsServiceImpl implements Events {
                 return;
             }
             var request = containerd.services.events.v1.SubscribeRequest.newBuilder()
-                    .addAllFilters(filter.toFieldpathFilters(namespace))
+                    .addFilters(namespaceFilter)
                     .build();
             stub.subscribe(request, new ClientResponseObserver<
                     containerd.services.events.v1.SubscribeRequest, containerd.types.Envelope>() {
@@ -142,7 +149,7 @@ public final class EventsServiceImpl implements Events {
                     }
                     Event event = EventMapper.map(envelope);
                     try {
-                        handlerExecutor.submit(() -> {
+                        handlerExecutor.execute(() -> {
                             try {
                                 handler.accept(event);
                             } catch (Exception e) {
@@ -167,6 +174,9 @@ public final class EventsServiceImpl implements Events {
             });
         }
 
+        // Nothing to read from the reconnect's future: connect() reports failures through the
+        // stream observer, which lands back here and schedules the next attempt itself.
+        @SuppressWarnings("FutureReturnValueIgnored")
         private void handleStreamEnd(Throwable error) {
             if (stopped()) {
                 return;

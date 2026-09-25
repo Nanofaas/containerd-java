@@ -25,7 +25,7 @@ class PlatformSelectionTest {
     private static String index(String... platforms) {
         StringBuilder entries = new StringBuilder();
         for (String platform : platforms) {
-            String[] parts = platform.split("/");
+            String[] parts = platform.split("/", 2);
             if (!entries.isEmpty()) {
                 entries.append(',');
             }
@@ -116,7 +116,7 @@ class PlatformSelectionTest {
     void resolvesAnIndexThatCarriesTheHostPlatform() throws Exception {
         Platform host = Platform.host();
         try (var fake = new FakeRegistry(index("linux/ppc64le", host.os() + "/" + host.architecture()))) {
-            assertThat(new ImageRootfsResolver(fake.channel).resolveChainId("multi:latest"))
+            assertThat(new ImageRootfsResolver(fake.channel).resolve("multi:latest").chainId())
                     .isEqualTo("sha256:only-layer");
         }
     }
@@ -129,7 +129,7 @@ class PlatformSelectionTest {
         String foreign = host.architecture().equals("arm64") ? "amd64" : "arm64";
         try (var fake = new FakeRegistry(index("linux/" + foreign, "linux/ppc64le"))) {
             var resolver = new ImageRootfsResolver(fake.channel);
-            assertThatThrownBy(() -> resolver.resolveChainId("foreign:latest"))
+            assertThatThrownBy(() -> resolver.resolve("foreign:latest"))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining(host.os() + "/" + host.architecture())
                     .hasMessageContaining(foreign);
@@ -142,7 +142,7 @@ class PlatformSelectionTest {
         String foreign = host.architecture().equals("arm64") ? "amd64" : "arm64";
         try (var fake = new FakeRegistry(index("linux/" + foreign, "unknown/unknown"))) {
             var resolver = new ImageRootfsResolver(fake.channel);
-            assertThatThrownBy(() -> resolver.resolveChainId("foreign:latest"))
+            assertThatThrownBy(() -> resolver.resolve("foreign:latest"))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining(foreign)
                     .as("attestation manifests are not platforms a caller could have chosen")

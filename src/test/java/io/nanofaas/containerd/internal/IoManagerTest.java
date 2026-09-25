@@ -15,7 +15,7 @@ class IoManagerTest {
         try {
             assertThat(Files.exists(fifos.stdout())).isTrue();
             var executor = Executors.newVirtualThreadPerTaskExecutor();
-            var writer = executor.submit(() -> IoManager.writeFifo(fifos.stdout(), "hello fifo\n".getBytes()));
+            var writer = executor.submit(() -> IoManager.writeFifo(fifos.stdout(), "hello fifo\n".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
             String read = IoManager.readFifo(fifos.stdout());
             writer.get();
             assertThat(read).isEqualTo("hello fifo\n");

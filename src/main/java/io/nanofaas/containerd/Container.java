@@ -14,4 +14,9 @@ import java.util.Map;
  * @param labels labels stored on the container, including containerd's own GC references
  */
 public record Container(String id, String image, String snapshotter, String snapshotKey, Instant createdAt, Map<String, String> labels) {
+
+    /** Defensively copies the labels, so the record cannot change under its holder. */
+    public Container {
+        labels = Map.copyOf(labels);
+    }
 }

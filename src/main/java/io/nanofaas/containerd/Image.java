@@ -13,4 +13,9 @@ import java.util.Map;
  * @param labels labels stored on the image
  */
 public record Image(String name, String digest, long size, Instant createdAt, Map<String, String> labels) {
+
+    /** Defensively copies the labels, so the record cannot change under its holder. */
+    public Image {
+        labels = Map.copyOf(labels);
+    }
 }

@@ -3,7 +3,6 @@ package io.nanofaas.containerd.internal;
 import com.google.protobuf.Any;
 import com.google.protobuf.Timestamp;
 import io.nanofaas.containerd.Event;
-import io.nanofaas.containerd.EventFilter;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,14 +46,5 @@ class EventMapperTest {
     void unknownPayloadDecodesToNullTaskEvent() {
         var envelope = containerd.types.Envelope.newBuilder().setTopic("/snapshots/update").build();
         assertThat(EventMapper.map(envelope).taskEvent()).isNull();
-    }
-
-    @Test
-    void filterBuildsFieldpathExpressions() {
-        EventFilter filter = EventFilter.topics("/tasks/start", "/tasks/exit");
-        // Only the namespace filter is sent server-side (topic selection is client-side); an empty
-        // topics list still yields the namespace scoping filter.
-        assertThat(filter.topics()).containsExactly("/tasks/start", "/tasks/exit");
-        assertThat(filter.toFieldpathFilters("nanofaas")).containsExactly("namespace==nanofaas");
     }
 }

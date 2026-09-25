@@ -322,14 +322,12 @@ class ContainerNetworkLifecycleTest {
     java.nio.file.Path state;
 
     private ContainersServiceImpl service(FakeContainerd fake, ContainerNetwork network) {
-        return new ContainersServiceImpl(fake.channel, "overlayfs", "io.containerd.runc.v2", null,
-                java.time.Duration.ofSeconds(1), network, state);
+        return service(fake, network, state);
     }
 
     private static ContainersServiceImpl service(FakeContainerd fake, ContainerNetwork network,
                                                  java.nio.file.Path stateDirectory) {
-        return new ContainersServiceImpl(fake.channel, "overlayfs", "io.containerd.runc.v2", null,
-                java.time.Duration.ofSeconds(1), network, stateDirectory);
+        return TestServices.containers(fake.channel, java.time.Duration.ofSeconds(1), network, stateDirectory);
     }
 
     private static ContainerSpec networked() {
@@ -828,7 +826,7 @@ class ContainerNetworkLifecycleTest {
             assertThat(fake.taskExists).isTrue();
             assertThat(fake.snapshotExists).isTrue();
             assertThat(containers.pendingRemovals()).extracting(io.nanofaas.containerd.Container::id).containsExactly("net-1");
-            assertThat(new TasksServiceImpl(fake.channel).list()).extracting(io.nanofaas.containerd.TaskInfo::containerId)
+            assertThat(TestServices.tasks(fake.channel).list()).extracting(io.nanofaas.containerd.TaskInfo::containerId)
                     .containsExactly("net-1");
         }
     }
