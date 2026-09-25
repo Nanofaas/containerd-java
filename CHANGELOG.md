@@ -4,7 +4,7 @@ All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the major version is 0, minor
 versions may carry breaking changes.
 
-## [Unreleased]
+## [0.23.0]
 
 ### Removed
 
@@ -32,8 +32,6 @@ versions may carry breaking changes.
 - Add CPU affinity, memory reservation, OCI cgroup path and explicit systemd shim options.
 - Publish separate core and CNI Maven artifacts with transitive dependencies and native metadata.
 - Add unit/native-compatible journal tests and an explicit rootless cgroup integration gate.
-
-## [Unreleased]
 
 ### Added
 
