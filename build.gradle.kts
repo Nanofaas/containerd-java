@@ -20,7 +20,7 @@ plugins {
 }
 
 group = "io.nanofaas"
-version = "0.22.0"
+version = "0.23.0"
 
 val containerdApiVersion = "v2.2.1" // pinned containerd API; bump together with vendored protos
 val grpcVersion = "1.73.0"
