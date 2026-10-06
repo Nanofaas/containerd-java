@@ -4,6 +4,19 @@ All notable changes to this project are documented here. This project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). While the major version is 0, minor
 versions may carry breaking changes.
 
+## [0.24.0]
+
+### Added
+
+- `ContainerdClient.Builder.registryHostsDirectory(Path)` configures the daemon-side
+  registry hosts directory for Transfer pulls. Registry endpoints, HTTP mirrors and
+  custom TLS trust in `hosts.toml` are now forwarded through `OCIRegistry.resolver.host_dir`.
+  Paths must be absolute and readable by containerd; they are not checked against the
+  client's filesystem. The default resolver is unchanged, and authentication credentials
+  are still not supplied by this API.
+- A real-containerd integration test pulls a generated OCI image through an HTTP mirror
+  under a synthetic registry name, without depending on an external image registry.
+
 ## [0.23.0]
 
 ### Removed

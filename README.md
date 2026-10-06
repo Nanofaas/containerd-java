@@ -152,6 +152,43 @@ client cancels any subscription still open.
     ```
     and set `.runtimeName("crun")`.
 
+### Registry hosts configuration
+
+Image pulls use containerd's Transfer service. To use registry endpoints, HTTP mirrors
+or custom CA trust from `hosts.toml`, configure the directory explicitly on the client:
+
+```java
+ContainerdClient.builder()
+        .registryHostsDirectory(Path.of("/etc/containerd/certs.d"))
+        .build();
+```
+
+Import `java.nio.file.Path`. Each registry has its own directory, for example
+`/etc/containerd/certs.d/registry.example:5000/hosts.toml`:
+
+```toml
+server = "http://registry.example:5000"
+
+[host."http://registry.example:5000"]
+  capabilities = ["pull", "resolve"]
+```
+
+The daemon reads this absolute path in its own filesystem and mount namespace. If the
+client and daemon run in separate containers, mount the files into the daemon and pass
+its path; the client does not need the same mount. Rootless daemons also need directory
+and certificate read access. Unset clients retain the default resolver and TLS behavior.
+Use HTTP only for a registry you deliberately configured for HTTP; a custom CA does not
+require disabling TLS verification. See [containerd registry hosts](https://github.com/containerd/containerd/blob/v2.2.1/docs/hosts.md)
+for CA and mirror syntax.
+
+Setting only the Transfer plugin's `config_path` did not apply these settings in our
+containerd 2.2.2 test. This option sends the directory in the pull request itself.
+It does not read Docker login credentials or supply Transfer authentication streams.
+
+The `RegistryHostsIT` integration test verifies the public builder against a real daemon
+using a temporary HTTP registry fixture. If the daemon's network namespace cannot reach
+host loopback, set `-Dio.nanofaas.containerd.registry-fixture-host=<reachable-host-IP>`.
+
 ## crun configuration assumptions
 
 The library never invokes `crun` or `runc` directly — it only ever talks to containerd, which
@@ -514,10 +551,10 @@ verbatim from containerd v2.2.1 and remain copyright The containerd Authors, und
 licence. See [NOTICE](NOTICE).
 
 
-## Recoverable lifecycle (0.23.0)
+## Recoverable lifecycle
 
-Published Maven coordinates are `io.nanofaas:containerd-java:0.23.0` (core) and
-`io.nanofaas:containerd-java-cni:0.23.0` (core plus `io.libcni:libcni-java:0.23.0`
+Published Maven coordinates are `io.nanofaas:containerd-java:0.24.0` (core) and
+`io.nanofaas:containerd-java-cni:0.24.0` (core plus `io.libcni:libcni-java:0.23.0`
 transitively). Both include source/Javadoc artifacts; native reachability metadata ships in core
 and in the transitive libcni artifact. Publication goes to GitHub Packages at
 `https://maven.pkg.github.com/Nanofaas/containerd-java`, from a `v*` tag whose number has to
@@ -533,7 +570,7 @@ To build against a local libcni-java checkout rather than the published artifact
 Consumers need only the CNI coordinate when networking is required:
 
 ```groovy
-dependencies { implementation 'io.nanofaas:containerd-java-cni:0.23.0' }
+dependencies { implementation 'io.nanofaas:containerd-java-cni:0.24.0' }
 ```
 
 Choose a persistent `ContainerdClient.builder().stateDirectory(path)`. The client scopes files as
