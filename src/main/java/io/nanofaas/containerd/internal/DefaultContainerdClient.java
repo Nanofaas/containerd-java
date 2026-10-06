@@ -29,6 +29,16 @@ public final class DefaultContainerdClient implements ContainerdClient {
                                    java.time.Duration stopTimeout,
                                    io.nanofaas.containerd.spi.ContainerNetwork network,
                                    java.nio.file.Path stateDirectory, boolean systemdCgroup) {
+        this(socketPath, namespace, snapshotter, runtimeName, runtimeBinaryName, stopTimeout,
+                network, stateDirectory, systemdCgroup, null);
+    }
+
+    public DefaultContainerdClient(String socketPath, String namespace, String snapshotter,
+                                   String runtimeName, String runtimeBinaryName,
+                                   java.time.Duration stopTimeout,
+                                   io.nanofaas.containerd.spi.ContainerNetwork network,
+                                   java.nio.file.Path stateDirectory, boolean systemdCgroup,
+                                   java.nio.file.Path registryHostsDirectory) {
         // Null from the builder means the caller expressed no preference.
         java.nio.file.Path state = stateDirectory == null
                 ? ContainersServiceImpl.DEFAULT_STATE_DIR : stateDirectory;
@@ -43,7 +53,7 @@ public final class DefaultContainerdClient implements ContainerdClient {
         log.debug("containerd client created (namespace={}, snapshotter={}, runtime={}, binaryName={})",
                 namespace, snapshotter, runtimeName, runtimeBinaryName);
         // One shared facade per client; building them here is free — it only constructs gRPC stubs.
-        this.images = new ImagesServiceImpl(channel, snapshotter);
+        this.images = new ImagesServiceImpl(channel, snapshotter, registryHostsDirectory);
         this.containers = new ContainersServiceImpl(channel, snapshotter, runtimeName, runtimeBinaryName, stopTimeout,
                 network, state, systemdCgroup);
         this.events = new EventsServiceImpl(channel, namespace);

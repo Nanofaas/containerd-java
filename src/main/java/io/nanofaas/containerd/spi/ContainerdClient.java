@@ -65,6 +65,7 @@ public interface ContainerdClient extends AutoCloseable {
         // Null means "the client's default": the default belongs with the code that uses it, not
         // spelled out a second time here where the two could drift.
         private Path stateDirectory;
+        private Path registryHostsDirectory;
 
         private Builder() {
         }
@@ -189,10 +190,31 @@ public interface ContainerdClient extends AutoCloseable {
             return this;
         }
 
+        /**
+         * Configures registry-specific hosts for image pulls through containerd's Transfer service.
+         *
+         * <p>The directory contains registry-named subdirectories with {@code hosts.toml} files
+         * for endpoints, mirrors and TLS trust. It is read by the daemon, not this client: the
+         * absolute path must be visible and readable in containerd's filesystem and mount namespace.
+         * No local filesystem check is performed. Left unset, containerd's default resolver is used.
+         * This does not supply registry authentication credentials.
+         *
+         * @param registryHostsDirectory absolute directory path as seen by the daemon
+         * @return this builder
+         */
+        public Builder registryHostsDirectory(Path registryHostsDirectory) {
+            Objects.requireNonNull(registryHostsDirectory, "registryHostsDirectory");
+            if (!registryHostsDirectory.isAbsolute()) {
+                throw new IllegalArgumentException("registryHostsDirectory must be absolute: " + registryHostsDirectory);
+            }
+            this.registryHostsDirectory = registryHostsDirectory;
+            return this;
+        }
+
         /** {@return a client connected to the configured socket} */
         public ContainerdClient build() {
             return new DefaultContainerdClient(socketPath, namespace, snapshotter, runtimeName,
-                    runtimeBinaryName, stopTimeout, network, stateDirectory, systemdCgroup);
+                    runtimeBinaryName, stopTimeout, network, stateDirectory, systemdCgroup, registryHostsDirectory);
         }
     }
 }

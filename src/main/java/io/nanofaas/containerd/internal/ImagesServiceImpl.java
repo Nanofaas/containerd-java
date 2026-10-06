@@ -11,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.nio.file.Path;
 
 /**
  * Image operations. Pulls go through containerd's Transfer service (the mechanism ctr uses):
@@ -23,11 +24,17 @@ public final class ImagesServiceImpl implements Images {
     private final containerd.services.images.v1.ImagesGrpc.ImagesBlockingStub stub;
     private final containerd.services.transfer.v1.TransferGrpc.TransferBlockingStub transfer;
     private final String snapshotter;
+    private final Path registryHostsDirectory;
 
     public ImagesServiceImpl(ManagedChannel channel, String snapshotter) {
+        this(channel, snapshotter, null);
+    }
+
+    public ImagesServiceImpl(ManagedChannel channel, String snapshotter, Path registryHostsDirectory) {
         this.stub = containerd.services.images.v1.ImagesGrpc.newBlockingStub(channel);
         this.transfer = containerd.services.transfer.v1.TransferGrpc.newBlockingStub(channel);
         this.snapshotter = snapshotter;
+        this.registryHostsDirectory = registryHostsDirectory;
     }
 
     @Override
@@ -40,9 +47,11 @@ public final class ImagesServiceImpl implements Images {
         log.debug("pull start: reference={} platform={}/{} snapshotter={}",
                 reference, platform.os(), platform.architecture(), snapshotter);
         var protoPlatform = ProtoMapper.toProto(platform);
-        var source = containerd.types.transfer.OCIRegistry.newBuilder()
-                .setReference(reference)
-                .build();
+        var source = containerd.types.transfer.OCIRegistry.newBuilder().setReference(reference);
+        if (registryHostsDirectory != null) {
+            source.setResolver(containerd.types.transfer.RegistryResolver.newBuilder()
+                    .setHostDir(registryHostsDirectory.toString()));
+        }
         var destination = containerd.types.transfer.ImageStore.newBuilder()
                 .setName(reference)
                 .addPlatforms(protoPlatform)
@@ -54,7 +63,7 @@ public final class ImagesServiceImpl implements Images {
         try {
             // The Transfer RPC blocks until the transfer completes.
             transfer.transfer(containerd.services.transfer.v1.TransferRequest.newBuilder()
-                    .setSource(TypeUrls.pack(source))
+                    .setSource(TypeUrls.pack(source.build()))
                     .setDestination(TypeUrls.pack(destination))
                     .build());
         } catch (StatusRuntimeException e) {
