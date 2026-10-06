@@ -188,6 +188,9 @@ It does not read Docker login credentials or supply Transfer authentication stre
 The `RegistryHostsIT` integration test verifies the public builder against a real daemon
 using a temporary HTTP registry fixture. If the daemon's network namespace cannot reach
 host loopback, set `-Dio.nanofaas.containerd.registry-fixture-host=<reachable-host-IP>`.
+The fixture uses the default `overlayfs` snapshotter; set
+`-Dio.nanofaas.containerd.snapshotter=native` when the daemon's Transfer unpack
+configuration uses `native`.
 
 ## crun configuration assumptions
 

@@ -85,7 +85,8 @@ class RegistryHostsIT extends ContainerdConnectionIT {
                       capabilities = ["pull", "resolve"]
                     """.formatted(endpoint, endpoint));
             try (var configured = ContainerdClient.builder().socketPath(SOCKET)
-                    .namespace("registry-it-" + UUID.randomUUID()).snapshotter("native")
+                    .namespace("registry-it-" + UUID.randomUUID())
+                    .snapshotter(System.getProperty("io.nanofaas.containerd.snapshotter", "overlayfs"))
                     .registryHostsDirectory(hostsDirectory).build()) {
                 try {
                     configured.images().pull(image);
