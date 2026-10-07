@@ -80,7 +80,7 @@ an `exec` inside a task is a `Process`. See [Conceptual glossary](#conceptual-gl
 
 `build` also produces `-sources.jar` and `-javadoc.jar` alongside the main artifact.
 
-The next Maven Central coordinate is `io.github.nanofaas:containerd-java:0.25.0`; see [publishing](#publishing-to-maven-central).
+The Maven Central coordinate is `io.github.nanofaas:containerd-java:0.25.0`; see [publishing](#publishing-to-maven-central).
 
 Changes between releases are listed in [CHANGELOG.md](CHANGELOG.md). Note that 0.3.0 requires Java 22 and carries other breaking
 changes; 0.2.0 did too.
@@ -541,11 +541,11 @@ licence. See [NOTICE](NOTICE).
 
 ## Recoverable lifecycle
 
-The next Maven Central release is prepared as
+The libraries are available on Maven Central as
 `io.github.nanofaas:containerd-java:0.25.0` (core) and
 `io.github.nanofaas:containerd-java-cni:0.25.0` (core plus
-`io.github.nanofaas:libcni-java:0.24.0` transitively). They become downloadable
-after the first Central release succeeds. Both include source/Javadoc artifacts;
+`io.github.nanofaas:libcni-java:0.24.0` transitively), without download credentials.
+Both include source/Javadoc artifacts;
 native reachability metadata ships in core and in the transitive libcni artifact.
 The previous `io.nanofaas:containerd-java:0.24.0` and
 `io.nanofaas:containerd-java-cni:0.24.0` remain on GitHub Packages.
