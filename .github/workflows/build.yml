@@ -3,7 +3,7 @@ name: build
 on:
   push:
     branches: [master]
-    # A release version is published from a tag, never from a push: GitHub Packages
+    # A release version is published from a tag, never from a push: Maven Central
     # will not accept the same version twice, so a push-triggered publish would fail
     # on the second commit. Pushes to master still build and test.
     tags: ["v*"]
@@ -17,11 +17,6 @@ concurrency:
 
 permissions:
   contents: read
-  # Read access for the published libcni-java this build depends on. CI resolves that
-  # artifact rather than building the companion from a checkout, so the version these
-  # jobs test is the version a consumer resolves -- a bump that is not published fails
-  # here, at resolution, instead of staying green on a substituted source tree.
-  packages: read
 
 jobs:
   unit:
@@ -44,9 +39,6 @@ jobs:
 
       - name: Build and run unit tests
         working-directory: containerd-java
-        env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./gradlew build --stacktrace
 
       - name: Upload test report
@@ -114,9 +106,6 @@ jobs:
 
       - name: Run integration tests
         working-directory: containerd-java
-        env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./gradlew integrationTest --stacktrace
 
       # The integration tests skip themselves via JUnit Assumptions when containerd is not
@@ -194,13 +183,9 @@ jobs:
       - name: Run the CNI networking tests
         working-directory: containerd-java
         # Root, and a Gradle home of its own so it does not take ownership of the runner user's.
-        # `sudo -E` keeps the credentials below, so libcni-java resolves from GitHub Packages the
-        # way it does for a consumer -- this is the step that would notice a published artifact
-        # a consumer could not use.
+        # libcni-java resolves anonymously from Maven Central as it does for a consumer;
+        # this also checks that the released artifact works for privileged CNI tests.
         run: sudo -E ./gradlew -g /tmp/gradle-root -Dmaven.repo.local="$HOME/.m2/repository" cniIntegrationTest --stacktrace
-        env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Root still writes its test results and generated sources into build/, and every later step
       # runs as the runner user, which then cannot even delete them. Always, so that a failing CNI
@@ -227,9 +212,6 @@ jobs:
 
       - name: Build the example as a native image
         working-directory: containerd-java
-        env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./gradlew nativeCompile --stacktrace
 
       - name: Run the native image against containerd
@@ -253,17 +235,13 @@ jobs:
           retention-days: 7
 
   publish:
-    name: publish to GitHub Packages
+    name: publish to Maven Central
     # Only once both jobs agree the library works, and only for a tag: a package is not
-    # something to take back. Both jobs resolved libcni-java from GitHub Packages, so what
+    # something to take back. Both jobs resolved libcni-java from Maven Central, so what
     # ships is built against the same artifact the tests did.
     needs: [unit, integration]
     if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
     runs-on: ubuntu-latest
-    # Write rather than read, and only here: the workflow-level grant stays read.
-    permissions:
-      contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -299,6 +277,8 @@ jobs:
       - name: Publish
         working-directory: containerd-java
         env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./gradlew publishAllPublicationsToGitHubPackagesRepository --stacktrace
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+        run: ./gradlew publishAggregationToCentralPortal --stacktrace

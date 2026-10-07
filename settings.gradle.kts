@@ -4,7 +4,7 @@ plugins {
 
 rootProject.name = "containerd-java"
 
-// libcni-java is the published artifact from GitHub Packages, the one consumers resolve. To work
+// libcni-java is the published artifact from Maven Central, the one consumers resolve. To work
 // on both at once, name a checkout explicitly: ./gradlew build -PlibcniDir=../libcni-java
 // Never implicit: a build that swapped in whatever happened to sit next to it would pass against a
 // libcni no consumer gets.

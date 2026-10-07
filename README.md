@@ -80,7 +80,7 @@ an `exec` inside a task is a `Process`. See [Conceptual glossary](#conceptual-gl
 
 `build` also produces `-sources.jar` and `-javadoc.jar` alongside the main artifact.
 
-Gradle coordinates (once published): `io.nanofaas:containerd-java:0.3.0`.
+The next Maven Central coordinate is `io.github.nanofaas:containerd-java:0.25.0`; see [publishing](#publishing-to-maven-central).
 
 Changes between releases are listed in [CHANGELOG.md](CHANGELOG.md). Note that 0.3.0 requires Java 22 and carries other breaking
 changes; 0.2.0 did too.
@@ -431,27 +431,12 @@ It is a separate artifact on purpose: it pulls
 [libcni-java](https://github.com/Nanofaas/libcni-java) and, through it, Gson, and the core has no
 JSON dependency by design. Consumers who do not want CNI never see either.
 
-libcni-java is published to GitHub Packages, which requires a token to read even a public package,
-unlike Maven Central:
-
-```kotlin
-repositories {
-    maven {
-        url = uri("https://maven.pkg.github.com/Nanofaas/libcni-java")
-        credentials {
-            username = System.getenv("GITHUB_ACTOR")
-            password = System.getenv("GITHUB_TOKEN")   // needs read:packages
-        }
-        content { includeGroup("io.libcni") }   // only this group, so the core needs no token
-    }
-}
-```
-
-Every build resolves that published artifact, CI and local alike, so a broken publish is caught
-here rather than by a consumer. Locally that needs a token with `read:packages`, as
-`GITHUB_ACTOR`/`GITHUB_TOKEN` or as `gpr.user`/`gpr.token` in `~/.gradle/gradle.properties`.
-To work on both libraries at once, name a libcni-java checkout explicitly and it is built from
-source instead: `./gradlew build -PlibcniDir=../libcni-java`. It is never picked up implicitly.
+The CNI source set resolves `io.github.nanofaas:libcni-java:0.24.0` from Maven
+Central, without download credentials. This requires the first libcni Central
+release to be published before containerd's release workflow runs.
+To work on both libraries before publication, name a libcni-java checkout
+explicitly: `./gradlew build -PlibcniDir=../libcni-java`. It is never picked up
+implicitly.
 
 The timing is the library's responsibility rather than the caller's, because it is easy to get
 wrong and expensive when you do: the namespace CNI configures is the task's, so it exists only
@@ -556,13 +541,14 @@ licence. See [NOTICE](NOTICE).
 
 ## Recoverable lifecycle
 
-Published Maven coordinates are `io.nanofaas:containerd-java:0.24.0` (core) and
-`io.nanofaas:containerd-java-cni:0.24.0` (core plus `io.libcni:libcni-java:0.23.0`
-transitively). Both include source/Javadoc artifacts; native reachability metadata ships in core
-and in the transitive libcni artifact. Publication goes to GitHub Packages at
-`https://maven.pkg.github.com/Nanofaas/containerd-java`, from a `v*` tag whose number has to
-match the version in `build.gradle.kts`. A push never publishes: a version cannot be
-published twice, so publishing from a branch would fail on the second commit.
+The next Maven Central release is prepared as
+`io.github.nanofaas:containerd-java:0.25.0` (core) and
+`io.github.nanofaas:containerd-java-cni:0.25.0` (core plus
+`io.github.nanofaas:libcni-java:0.24.0` transitively). They become downloadable
+after the first Central release succeeds. Both include source/Javadoc artifacts;
+native reachability metadata ships in core and in the transitive libcni artifact.
+The previous `io.nanofaas:containerd-java:0.24.0` and
+`io.nanofaas:containerd-java-cni:0.24.0` remain on GitHub Packages.
 
 To build against a local libcni-java checkout rather than the published artifact:
 
@@ -573,7 +559,8 @@ To build against a local libcni-java checkout rather than the published artifact
 Consumers need only the CNI coordinate when networking is required:
 
 ```groovy
-dependencies { implementation 'io.nanofaas:containerd-java-cni:0.24.0' }
+repositories { mavenCentral() }
+dependencies { implementation 'io.github.nanofaas:containerd-java-cni:0.25.0' }
 ```
 
 Choose a persistent `ContainerdClient.builder().stateDirectory(path)`. The client scopes files as
@@ -615,3 +602,24 @@ The regular `test` suite covers durable cleanup and namespace isolation and can 
 `nativeTest` with GraalVM. JVM tests and published metadata alone do not establish live rootless
 or native runtime correctness. For reproducible CI, build pinned library commits or released
 versions instead of using mutable snapshots as the only source.
+
+## Publishing to Maven Central
+
+Use the verified `io.github.nanofaas` namespace and the four Actions secrets
+`MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`, `SIGNING_KEY` and
+`SIGNING_PASSWORD`. The Sonatype token and signing key are used only by the
+publication job. Gradle imports the private key in memory and signs both Maven
+publications, including their POMs, sources and Javadoc.
+
+See the companion library's [publishing guide](https://github.com/Nanofaas/libcni-java/blob/master/docs/publishing.md)
+for namespace verification, token/key setup and the first release order. Publish
+libcni `v0.24.0` before containerd `v0.25.0`: CI consumes libcni from Central.
+The existing workflow publishes only from a `v*` tag whose number matches
+`build.gradle.kts`, after its unit and integration/native jobs pass. Both core
+and CNI artifacts are released together by `publishAggregationToCentralPortal`.
+Ordinary builds and local Maven staging require no publication credentials.
+With a signing key configured, stage the signed deployment ZIP without uploading it:
+
+```sh
+./gradlew nmcpZipAllPublications -PlibcniDir=../libcni-java
+```

@@ -4,6 +4,9 @@ import net.ltgt.gradle.errorprone.errorprone
 plugins {
     `java-library`
     `maven-publish`
+    signing
+    id("com.gradleup.nmcp") version "1.6.2"
+    id("com.gradleup.nmcp.aggregation") version "1.6.2"
     application
     jacoco
     id("com.google.protobuf") version "0.9.5"
@@ -19,8 +22,8 @@ plugins {
     id("net.ltgt.errorprone") version "5.1.1"
 }
 
-group = "io.nanofaas"
-version = "0.24.0"
+group = "io.github.nanofaas"
+version = "0.25.0"
 
 val containerdApiVersion = "v2.2.1" // pinned containerd API; bump together with vendored protos
 val grpcVersion = "1.73.0"
@@ -32,24 +35,12 @@ val junitVersion = "5.11.4"
 val junitPlatformVersion = "1.11.4"
 val assertjVersion = "3.27.3"
 val javaxAnnotationVersion = "1.3.2"
-val libcniVersion = "0.23.0"
+val libcniVersion = "0.24.0"
 val spotbugsVersion = "4.10.4"
 val errorProneVersion = "2.50.0"
 
 repositories {
     mavenCentral()
-    // libcni-java, for the optional CNI source set. GitHub Packages needs credentials even to
-    // read a public package, unlike Maven Central: a token with read:packages. Declared for the
-    // CNI configurations only, so nobody building the core has to have one.
-    maven {
-        name = "GitHubPackages"
-        url = uri("https://maven.pkg.github.com/Nanofaas/libcni-java")
-        credentials {
-            username = System.getenv("GITHUB_ACTOR") ?: providers.gradleProperty("gpr.user").orNull
-            password = System.getenv("GITHUB_TOKEN") ?: providers.gradleProperty("gpr.token").orNull
-        }
-        content { includeGroup("io.libcni") }
-    }
 }
 
 java {
@@ -197,7 +188,7 @@ cni.compileClasspath += sourceSets.main.get().output
 cni.runtimeClasspath += sourceSets.main.get().output
 
 dependencies {
-    "cniImplementation"("io.libcni:libcni-java:$libcniVersion")
+    "cniImplementation"("io.github.nanofaas:libcni-java:$libcniVersion")
     "cniImplementation"("org.slf4j:slf4j-api:$slf4jVersion")
 }
 
@@ -225,18 +216,6 @@ val cniJavadocJar = tasks.register<Jar>("cniJavadocJar") {
     from(cniJavadoc)
 }
 publishing {
-    repositories {
-        maven {
-            name = "GitHubPackages"
-            url = uri("https://maven.pkg.github.com/Nanofaas/containerd-java")
-            // Credentials come from the environment so nothing is committed. In Actions these are
-            // the workflow's own GITHUB_TOKEN; locally, a personal token with write:packages.
-            credentials {
-                username = System.getenv("GITHUB_ACTOR") ?: providers.gradleProperty("gpr.user").orNull
-                password = System.getenv("GITHUB_TOKEN") ?: providers.gradleProperty("gpr.token").orNull
-            }
-        }
-    }
     publications {
         create<MavenPublication>("core") {
             from(components["java"])
@@ -249,8 +228,8 @@ publishing {
             pom.withXml {
                 val dependencies = asNode().appendNode("dependencies")
                 for ((group, artifact, version) in listOf(
-                    Triple("io.nanofaas", "containerd-java", project.version.toString()),
-                    Triple("io.libcni", "libcni-java", libcniVersion)
+                    Triple(project.group.toString(), "containerd-java", project.version.toString()),
+                    Triple(project.group.toString(), "libcni-java", libcniVersion)
                 )) {
                     dependencies.appendNode("dependency").apply {
                         appendNode("groupId", group)
@@ -466,4 +445,35 @@ protobuf {
             }
         }
     }
+}
+
+// Ordinary builds and local Maven staging work without a publishing key.
+// Central uploads check the credentials before sending the bundle.
+signing {
+    val key = providers.environmentVariable("SIGNING_KEY").orNull
+    isRequired = !key.isNullOrBlank()
+    if (!key.isNullOrBlank()) {
+        useInMemoryPgpKeys(key, providers.environmentVariable("SIGNING_PASSWORD").orNull)
+    }
+    sign(publishing.publications)
+}
+
+tasks.matching { it.name.endsWith("ToCentralPortal") }.configureEach {
+    doFirst {
+        val missing = listOf("MAVEN_CENTRAL_USERNAME", "MAVEN_CENTRAL_PASSWORD", "SIGNING_KEY")
+            .filter { System.getenv(it).isNullOrBlank() }
+        require(missing.isEmpty()) { "Missing publishing credentials: ${missing.joinToString()}" }
+    }
+}
+
+nmcpAggregation {
+    centralPortal {
+        username.set(providers.environmentVariable("MAVEN_CENTRAL_USERNAME"))
+        password.set(providers.environmentVariable("MAVEN_CENTRAL_PASSWORD"))
+        publishingType.set("AUTOMATIC")
+    }
+}
+
+dependencies {
+    add("nmcpAggregation", project(":"))
 }
